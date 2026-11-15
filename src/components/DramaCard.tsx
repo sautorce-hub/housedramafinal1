@@ -221,9 +221,13 @@ export const DramaCard: React.FC<DramaCardProps> = ({
                   onToggleMyList(drama);
                 }}
                 aria-label={
-                  isSaved
-                    ? `Remove ${drama.title} from Watchlist`
-                    : `Add ${drama.title} to Watchlist`
+                  drama.provider === 'LK21' || drama.mediaType === 'movie'
+                    ? isSaved
+                      ? `Remove ${drama.title} from Movie Watchlist`
+                      : `Save ${drama.title} to Movie Watchlist`
+                    : isSaved
+                    ? `Remove ${drama.title} from Drama Watchlist`
+                    : `Save ${drama.title} to Drama Watchlist`
                 }
                 className={`p-1.5 rounded-lg border backdrop-blur-md transition-all ${
                   isSaved

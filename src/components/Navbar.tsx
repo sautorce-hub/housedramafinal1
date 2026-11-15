@@ -10,6 +10,16 @@ import {
   Palette,
   User,
   Flame,
+  Home,
+  Compass,
+  Clock,
+  Crown,
+  Sparkles,
+  Mic,
+  Bookmark,
+  LayoutDashboard,
+  Layers,
+  Clapperboard,
 } from 'lucide-react';
 import { CoffeeDramaLogo } from './CoffeeDramaLogo';
 import { PWAInstallButton } from './PWAInstallBanner';
@@ -18,6 +28,7 @@ import type {
   AccentThemeId,
   LanguageCode,
   NavTab,
+  ProviderId,
 } from '../types/drama';
 
 interface NavbarProps {
@@ -26,6 +37,14 @@ interface NavbarProps {
   languageLoading: boolean;
   onChangeLanguage: (lang: LanguageCode) => void;
   onOpenSearchModal: () => void;
+}
+
+interface DesktopSidebarProps {
+  activeTab: NavTab;
+  selectedProvider: ProviderId;
+  hasActiveSubRoute: boolean;
+  onSelectTab: (tab: NavTab) => void;
+  onOpenProviderHub: () => void;
 }
 
 const LANGUAGES: { code: LanguageCode; flag: string; label: string }[] = [
@@ -41,6 +60,148 @@ const ACCENT_PRESETS: { id: AccentThemeId; name: string; color: string }[] = [
   { id: 'rose', name: 'Royal Rose', color: '#E11D48' },
   { id: 'emerald', name: 'Emerald Jade', color: '#10B981' },
 ];
+
+export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
+  activeTab,
+  selectedProvider,
+  hasActiveSubRoute,
+  onSelectTab,
+  onOpenProviderHub,
+}) => {
+  const { t, user, myListItems } = useDramaContext();
+
+  const primaryItems: Array<{
+    id: NavTab;
+    label: string;
+    icon: React.ReactNode;
+    badge?: number;
+  }> = [
+    { id: 'home', label: t.nav.home, icon: <Home className="w-4 h-4 shrink-0" /> },
+    {
+      id: 'explore',
+      label: t.nav.explore,
+      icon: <Compass className="w-4 h-4 shrink-0" />,
+    },
+    {
+      id: 'ranking',
+      label: t.nav.trending,
+      icon: <Flame className="w-4 h-4 shrink-0" />,
+    },
+    {
+      id: 'terbaru',
+      label: t.nav.latest,
+      icon: <Clock className="w-4 h-4 shrink-0" />,
+    },
+    {
+      id: 'vip',
+      label: t.nav.vip,
+      icon: <Crown className="w-4 h-4 shrink-0" />,
+    },
+    {
+      id: 'anime',
+      label: t.nav.anime,
+      icon: <Sparkles className="w-4 h-4 shrink-0" />,
+    },
+    {
+      id: 'dubbing',
+      label: t.nav.dubbed,
+      icon: <Mic className="w-4 h-4 shrink-0" />,
+    },
+    {
+      id: 'mylist',
+      label: t.nav.watchlist,
+      icon: <Bookmark className="w-4 h-4 shrink-0" />,
+      badge: myListItems.length > 0 ? myListItems.length : undefined,
+    },
+    {
+      id: 'dashboard',
+      label: t.nav.dashboard,
+      icon: <LayoutDashboard className="w-4 h-4 shrink-0" />,
+    },
+  ];
+
+  const isMoviesActive = !hasActiveSubRoute && activeTab === 'movies';
+
+  return (
+    <aside
+      aria-label="Desktop Sidebar Navigation"
+      className="hidden md:flex fixed left-0 top-14 sm:top-16 bottom-0 z-30 w-[72px] lg:w-[216px] flex-col justify-between bg-[var(--cd-bg)]/95 backdrop-blur-xl border-r border-white/10 p-2.5 lg:p-3.5"
+    >
+      <div className="flex-1 overflow-y-auto scrollbar-none space-y-1">
+        {primaryItems.map((item) => {
+          const isActive = !hasActiveSubRoute && activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onSelectTab(item.id)}
+              title={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              className={`w-full min-h-[42px] px-2.5 lg:px-3 py-2 rounded-xl flex items-center justify-center lg:justify-between gap-2.5 text-xs font-medium transition-colors ${
+                isActive
+                  ? 'bg-[var(--cd-accent-soft)] border border-[var(--cd-accent)]/50 cd-accent-text font-semibold'
+                  : 'border border-transparent text-[#A1A1AA] hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 min-w-0">
+                {item.icon}
+                <span className="hidden lg:inline truncate">{item.label}</span>
+              </span>
+              {typeof item.badge === 'number' && (
+                <span className="hidden lg:inline-flex px-1.5 py-0.5 rounded-full bg-white/10 text-[10px] font-bold tabular-nums text-white shrink-0">
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+
+        <button
+          type="button"
+          onClick={onOpenProviderHub}
+          title={t.nav.providers}
+          className={`w-full min-h-[42px] px-2.5 lg:px-3 py-2 rounded-xl flex items-center justify-center lg:justify-between gap-2.5 text-xs font-medium transition-colors ${
+            selectedProvider !== 'All'
+              ? 'bg-white/10 border border-white/20 text-white'
+              : 'border border-transparent text-[#A1A1AA] hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <span className="flex items-center gap-2.5 min-w-0">
+            <Layers className="w-4 h-4 shrink-0 text-[#D4AF37]" />
+            <span className="hidden lg:inline truncate">{t.nav.providers}</span>
+          </span>
+          {selectedProvider !== 'All' && (
+            <span className="hidden lg:inline text-[10px] font-semibold text-[#D4AF37] truncate max-w-[68px]">
+              {selectedProvider}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Bottom Anchored Movies Route Button */}
+      <div className="pt-3 mt-2 border-t border-white/10 shrink-0">
+        <button
+          type="button"
+          onClick={() => onSelectTab('movies')}
+          title={t.nav.movies}
+          aria-current={isMoviesActive ? 'page' : undefined}
+          className={`w-full min-h-[46px] px-2.5 lg:px-3.5 py-2.5 rounded-xl flex items-center justify-center lg:justify-start gap-2.5 text-xs font-bold transition-all border ${
+            isMoviesActive
+              ? 'cd-accent-bg border-[var(--cd-accent)] text-white shadow-lg'
+              : 'bg-[var(--cd-surface)] border-white/10 text-white hover:border-[var(--cd-accent)] hover:bg-[var(--cd-accent-soft)]'
+          }`}
+        >
+          <Clapperboard
+            className={`w-4 h-4 shrink-0 ${
+              isMoviesActive ? 'text-white' : 'cd-accent-text'
+            }`}
+          />
+          <span className="hidden lg:inline truncate">{t.nav.movies}</span>
+        </button>
+      </div>
+    </aside>
+  );
+};
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
@@ -94,23 +255,31 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
   }, []);
 
-  const navTabs: { id: NavTab; label: string }[] = [
+  // Keep Movies at the very bottom of the navigation drawer
+  const mobileDrawerTabs: { id: NavTab; label: string; icon?: React.ReactNode }[] = [
     { id: 'home', label: t.nav.home },
     { id: 'explore', label: t.nav.explore },
     { id: 'ranking', label: t.nav.trending },
     { id: 'terbaru', label: t.nav.latest },
     { id: 'vip', label: t.nav.vip },
+    { id: 'anime', label: t.nav.anime },
+    { id: 'dubbing', label: t.nav.dubbed },
     { id: 'mylist', label: t.nav.watchlist },
     { id: 'dashboard', label: t.nav.dashboard },
+    {
+      id: 'movies',
+      label: t.nav.movies,
+      icon: <Clapperboard className="w-4 h-4 cd-accent-text" />,
+    },
   ];
 
   const currentLang = LANGUAGES.find((l) => l.code === language) ?? LANGUAGES[0];
 
   return (
     <header className="sticky top-0 z-40 bg-[var(--cd-bg)]/95 backdrop-blur-xl border-b border-white/5">
-      <div className="max-w-[1440px] mx-auto px-3 sm:px-8 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
-        {/* Left Zone: Brand Logo + Primary Nav Links */}
-        <div className="flex items-center gap-5 lg:gap-7 min-w-0">
+      <div className="max-w-[1600px] mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
+        {/* Left Zone: Brand Logo */}
+        <div className="flex items-center gap-4 min-w-0">
           <button
             type="button"
             onClick={() => {
@@ -122,39 +291,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <CoffeeDramaLogo />
           </button>
-
-          <nav
-            className="hidden lg:flex items-center gap-5"
-            aria-label="Primary Navigation"
-          >
-            {navTabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => onSelectTab(tab.id)}
-                  className={`relative py-1.5 text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
-                    isActive
-                      ? 'text-white'
-                      : 'text-[#A1A1AA] hover:text-white'
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {tab.label}
-                    {tab.id === 'mylist' && myListItems.length > 0 && (
-                      <span className="text-[11px] font-semibold tabular-nums cd-accent-text">
-                        ({myListItems.length})
-                      </span>
-                    )}
-                  </span>
-                  {isActive && (
-                    <span className="absolute bottom-0 left-0 right-0 h-[2px] cd-accent-bg rounded-full" />
-                  )}
-                </button>
-              );
-            })}
-          </nav>
         </div>
 
         {/* Right Zone: PWA Install, Theme Accent Switcher, Language Switcher, Search, Account */}
@@ -346,11 +482,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </button>
 
-          {/* Drawer Trigger for smaller viewports */}
+          {/* Mobile Drawer Trigger */}
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            className="lg:hidden p-2 rounded-lg text-[#FAFAFA] hover:bg-white/5"
+            className="md:hidden p-2 rounded-lg text-[#FAFAFA] hover:bg-white/5"
             aria-label="Toggle navigation menu"
             aria-expanded={mobileMenuOpen}
           >
@@ -363,15 +499,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Responsive Menu Drawer */}
+      {/* Responsive Mobile Menu Drawer (Movies anchored at the very bottom) */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-t border-white/10 bg-[var(--cd-bg)]/95 backdrop-blur-xl px-4 py-3 space-y-1">
-          {[
-            ...navTabs,
-            { id: 'anime' as NavTab, label: t.nav.anime },
-            { id: 'dubbing' as NavTab, label: t.nav.dubbed },
-          ].map((tab) => {
+        <div className="md:hidden border-t border-white/10 bg-[var(--cd-bg)]/95 backdrop-blur-xl px-4 py-3 space-y-1">
+          {mobileDrawerTabs.map((tab) => {
             const isActive = activeTab === tab.id;
+            const isMoviesRow = tab.id === 'movies';
             return (
               <button
                 key={tab.id}
@@ -381,12 +514,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   setMobileMenuOpen(false);
                 }}
                 className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium flex items-center justify-between ${
+                  isMoviesRow ? 'mt-2 pt-3 border-t border-white/10' : ''
+                } ${
                   isActive
-                    ? 'bg-[var(--cd-accent-soft)] cd-accent-text'
+                    ? 'bg-[var(--cd-accent-soft)] cd-accent-text font-semibold'
                     : 'text-[#FAFAFA] hover:bg-white/5'
                 }`}
               >
-                <span>{tab.label}</span>
+                <span className="inline-flex items-center gap-2">
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </span>
                 {tab.id === 'mylist' && myListItems.length > 0 && (
                   <span className="text-xs tabular-nums">
                     {myListItems.length}

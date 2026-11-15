@@ -29,6 +29,8 @@ import {
   X,
   Compass,
   ChevronRight,
+  Clapperboard,
+  Lock,
 } from 'lucide-react';
 import {
   ACTIVE_PROVIDER_NAMES,
@@ -63,6 +65,11 @@ import {
   fetchHomeCatalog,
   getPeekCachedHomeCatalog,
 } from './services/homeService';
+import {
+  fetchLk21Detail,
+  fetchLk21EpisodesAsEpisodeItems,
+  movieToDramaItem,
+} from './services/movieService';
 import { useDramaContext } from './context/DramaContext';
 import {
   getDramaPath,
@@ -77,12 +84,13 @@ import type {
   EpisodeItem,
   HomeCatalogResponse,
   LanguageCode,
+  MediaProviderName,
   NavTab,
   ProviderId,
   ProviderName,
   WatchStatusFilter,
 } from './types/drama';
-import { Navbar } from './components/Navbar';
+import { Navbar, DesktopSidebar } from './components/Navbar';
 import { HeroSpotlight } from './components/HeroSpotlight';
 import { CarouselRow } from './components/CarouselRow';
 import { DramaCard } from './components/DramaCard';
@@ -94,6 +102,11 @@ import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
 
 const ExploreView = lazy(() => import('./components/ExploreView'));
+const MoviesView = lazy(() =>
+  import('./components/MoviesView').then((m) => ({
+    default: m.MoviesView,
+  }))
+);
 const ProviderEndpointSection = lazy(
   () => import('./components/ProviderEndpointSection')
 );
@@ -289,6 +302,9 @@ function parseProviderName(raw: string | null | undefined): ProviderName | undef
 function parseTabFromLocation(): NavTab {
   if (typeof window === 'undefined') return 'home';
   const p = window.location.pathname.toLowerCase();
+  if (p === '/movies' || p.startsWith('/movies/') || p.startsWith('/movie/')) {
+    return 'movies';
+  }
   if (p === '/explore') return 'explore';
   if (p === '/trending') return 'ranking';
   if (p === '/latest') return 'terbaru';
@@ -300,6 +316,8 @@ function parseTabFromLocation(): NavTab {
 
 function getTabPath(tab: NavTab): string {
   switch (tab) {
+    case 'movies':
+      return '/movies';
     case 'explore':
     case 'anime':
     case 'dubbing':
@@ -322,19 +340,51 @@ function getTabPath(tab: NavTab): string {
 function parseDramaRouteFromLocation(): {
   bookId: string;
   slugHint?: string;
-  providerHint?: ProviderName;
+  providerHint?: MediaProviderName;
   drama: DramaItem | null;
   episodes: EpisodeItem[];
 } | null {
   if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
-  const pHint = parseProviderName(params.get('provider'));
+  const rawProvParam = params.get('provider');
+  const pHint: MediaProviderName | undefined =
+    rawProvParam?.trim().toUpperCase() === 'LK21'
+      ? 'LK21'
+      : parseProviderName(rawProvParam);
 
   const queryDramaId = params.get('drama');
   if (queryDramaId) {
     return {
       bookId: queryDramaId,
       providerHint: pHint ?? 'DramaBox',
+      drama: null,
+      episodes: [],
+    };
+  }
+
+  // Match /movie/{slug}
+  const movieMatch = window.location.pathname.match(/^\/movie\/([^/]+)/i);
+  if (movieMatch) {
+    const slug = decodeURIComponent(movieMatch[1]).toLowerCase();
+    const ssr = window.__INITIAL_DRAMA__;
+    if (
+      ssr &&
+      (ssr.bookId === slug ||
+        ssr.drama?.slug === slug ||
+        ssr.drama?.provider === 'LK21')
+    ) {
+      return {
+        bookId: ssr.bookId || ssr.drama?.bookId || slug,
+        slugHint: slug,
+        providerHint: 'LK21',
+        drama: ssr.drama ?? null,
+        episodes: Array.isArray(ssr.episodes) ? ssr.episodes : [],
+      };
+    }
+    return {
+      bookId: slug,
+      slugHint: slug,
+      providerHint: 'LK21',
       drama: null,
       episodes: [],
     };
@@ -432,8 +482,11 @@ export default function App() {
     user,
     authModalOpen,
     openAuthModal,
+    closeAuthModal,
     setLanguageState,
     myListItems,
+    dramaWatchlistItems,
+    movieWatchlistItems,
     myListIds,
     likedDramaIds,
     completedDramaIds,
@@ -460,8 +513,21 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>(() => parseTabFromLocation());
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>('All');
   const [languageLoading, setLanguageLoading] = useState(false);
-  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState<boolean>(
+    () =>
+      typeof window !== 'undefined' &&
+      window.location.pathname.toLowerCase() === '/search'
+  );
   const [providerHubOpen, setProviderHubOpen] = useState(false);
+  const [dashboardSubTab, setDashboardSubTab] = useState<
+    'profile' | 'watchlist' | 'history' | 'comments'
+  >('profile');
+  const [dashboardWatchlistCategory, setDashboardWatchlistCategory] = useState<
+    'movie' | 'drama'
+  >('movie');
+  const [watchlistCategory, setWatchlistCategory] = useState<'drama' | 'movie'>(
+    'drama'
+  );
 
   // Programmatic SEO Landing Route State (/genre/*, /category/*, /tag/*)
   const [activeSeoLanding, setActiveSeoLanding] =
@@ -474,14 +540,15 @@ export default function App() {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
-  // Semantic /drama/{slug} Route State
+  // Semantic /drama/{slug} and /movie/{slug} Route State
   const [activeDramaRoute, setActiveDramaRoute] = useState<{
     bookId: string;
     slugHint?: string;
-    providerHint?: ProviderName;
+    providerHint?: MediaProviderName;
     drama: DramaItem | null;
     episodes: EpisodeItem[];
   } | null>(() => parseDramaRouteFromLocation());
+  const [moviesPool, setMoviesPool] = useState<DramaItem[]>([]);
 
   // Database-cached Home Catalog (Zero-latency SQLite backend cache)
   const [homeCatalog, setHomeCatalog] = useState<HomeCatalogResponse | null>(
@@ -1136,15 +1203,49 @@ export default function App() {
     }
   }, [activeTab, selectedProvider, extraFeeds, ensureExtraProviderFullLoaded]);
 
-  // Deep-link ?drama=...&provider=...&ep=... auto-launch playback
+  // Deep-link ?drama=...&provider=...&ep=... auto-launch playback (including LK21 movies)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const dramaId = params.get('drama');
     const epParam = Number(params.get('ep'));
-    const prov: ProviderName = parseProviderName(params.get('provider')) ?? 'DramaBox';
+    const rawProv = params.get('provider');
     if (!dramaId) return;
 
+    if (rawProv?.trim().toUpperCase() === 'LK21') {
+      Promise.allSettled([
+        fetchLk21Detail(dramaId),
+        fetchLk21EpisodesAsEpisodeItems(dramaId),
+      ]).then(([detRes, epsRes]) => {
+        const eps = epsRes.status === 'fulfilled' ? epsRes.value : [];
+        const movie: DramaItem =
+          detRes.status === 'fulfilled' && detRes.value
+            ? movieToDramaItem(detRes.value, eps.length || 1)
+            : {
+                bookId: dramaId,
+                slug: dramaId,
+                title: 'Featured Movie',
+                cover: '',
+                description: '',
+                chapterCount: eps.length || 1,
+                tags: [],
+                isVip: false,
+                provider: 'LK21',
+                mediaType: 'movie',
+              };
+        if (Number.isFinite(epParam) && epParam >= 1) {
+          setPlayerState({
+            drama: movie,
+            episode: epParam,
+            initialTime: 0,
+            episodes: eps,
+          });
+        }
+      });
+      return;
+    }
+
+    const prov: ProviderName = parseProviderName(rawProv) ?? 'DramaBox';
     const adapter = ALL_PROVIDER_ADAPTERS[prov] ?? dramaBoxProvider;
     Promise.allSettled([
       adapter.fetchDetail(dramaId),
@@ -1185,9 +1286,12 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = () => {
+      const isSearchPath =
+        window.location.pathname.toLowerCase() === '/search';
       const parsed = parseDramaRouteFromLocation();
       const parsedLanding = parseSeoLandingFromLocation();
       const parsedTab = parseTabFromLocation();
+      setSearchModalOpen(isSearchPath);
       setActiveDramaRoute(parsed);
       setActiveSeoLanding(parsed ? null : parsedLanding);
       if (!parsed && !parsedLanding) {
@@ -1200,6 +1304,8 @@ export default function App() {
   }, []);
 
   const handleNavigateTab = useCallback((tab: NavTab) => {
+    setSearchModalOpen(false);
+    setProviderHubOpen(false);
     setActiveDramaRoute(null);
     setActiveSeoLanding(null);
     setActiveTab(tab);
@@ -1211,6 +1317,42 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  const handleOpenSearch = useCallback(() => {
+    setProviderHubOpen(false);
+    closeAuthModal();
+    setSearchModalOpen(true);
+    if (window.location.pathname.toLowerCase() !== '/search') {
+      window.history.pushState({ search: true }, '', '/search');
+    }
+  }, [closeAuthModal]);
+
+  const handleCloseSearch = useCallback(() => {
+    setSearchModalOpen(false);
+    if (window.location.pathname.toLowerCase() === '/search') {
+      const targetPath = getTabPath(activeTab);
+      window.history.replaceState({ tab: activeTab }, '', targetPath);
+      syncSectionDocumentSeo(activeTab);
+    }
+  }, [activeTab]);
+
+  const handleOpenProviderHub = useCallback(() => {
+    setSearchModalOpen(false);
+    closeAuthModal();
+    if (window.location.pathname.toLowerCase() === '/search') {
+      window.history.replaceState({ tab: activeTab }, '', getTabPath(activeTab));
+    }
+    setProviderHubOpen(true);
+  }, [activeTab, closeAuthModal]);
+
+  const handleOpenLoginMenu = useCallback(() => {
+    setSearchModalOpen(false);
+    setProviderHubOpen(false);
+    if (window.location.pathname.toLowerCase() === '/search') {
+      window.history.replaceState({ tab: activeTab }, '', getTabPath(activeTab));
+    }
+    openAuthModal();
+  }, [activeTab, openAuthModal]);
+
   const openSeoLandingPath = useCallback((rawPath: string) => {
     const normalized = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
     const parsed = parseSeoLandingFromPath(normalized);
@@ -1218,6 +1360,8 @@ export default function App() {
     if (window.location.pathname !== normalized) {
       window.history.pushState({ seoLanding: parsed }, '', normalized);
     }
+    setSearchModalOpen(false);
+    setProviderHubOpen(false);
     setActiveDramaRoute(null);
     setActiveTab('home');
     setActiveSeoLanding(parsed);
@@ -1226,8 +1370,23 @@ export default function App() {
 
   useEffect(() => {
     const onNavigateEvent = (evt: Event) => {
-      const detail = (evt as CustomEvent<{ tab?: NavTab }>).detail;
+      const detail = (
+        evt as CustomEvent<{
+          tab?: NavTab;
+          subTab?: 'profile' | 'watchlist' | 'history' | 'comments';
+          watchlistCategory?: 'movie' | 'drama';
+        }>
+      ).detail;
       if (detail?.tab) {
+        if (detail.tab === 'dashboard') {
+          setDashboardSubTab(detail.subTab ?? 'profile');
+          if (detail.watchlistCategory) {
+            setDashboardWatchlistCategory(detail.watchlistCategory);
+          }
+        }
+        if (detail.tab === 'mylist' && detail.watchlistCategory) {
+          setWatchlistCategory(detail.watchlistCategory);
+        }
         handleNavigateTab(detail.tab);
       }
     };
@@ -1419,10 +1578,44 @@ export default function App() {
     extraFeeds,
   ]);
 
-  // Resolve clean /drama/{slug} client-side if not hydrated via SSR
+  // Resolve clean /drama/{slug} and /movie/{slug} client-side if not hydrated via SSR
   useEffect(() => {
     const slugHint = activeDramaRoute?.slugHint;
     if (!slugHint || activeDramaRoute?.drama) return;
+
+    if (activeDramaRoute?.providerHint === 'LK21') {
+      let cancelled = false;
+      Promise.allSettled([
+        fetchLk21Detail(slugHint),
+        fetchLk21EpisodesAsEpisodeItems(slugHint),
+      ])
+        .then(([detRes, epsRes]) => {
+          if (cancelled) return;
+          const eps = epsRes.status === 'fulfilled' ? epsRes.value : [];
+          if (detRes.status === 'fulfilled' && detRes.value) {
+            setActiveDramaRoute({
+              bookId: detRes.value.slug || slugHint,
+              providerHint: 'LK21',
+              drama: movieToDramaItem(detRes.value, eps.length || 1),
+              episodes: eps,
+            });
+          } else {
+            setActiveDramaRoute((prev) =>
+              prev ? { ...prev, slugHint: undefined } : null
+            );
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setActiveDramaRoute((prev) =>
+              prev ? { ...prev, slugHint: undefined } : null
+            );
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const localMatch = allLoadedDramas.find(
       (d) =>
@@ -1477,7 +1670,12 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeDramaRoute?.slugHint, activeDramaRoute?.drama, allLoadedDramas]);
+  }, [
+    activeDramaRoute?.slugHint,
+    activeDramaRoute?.drama,
+    activeDramaRoute?.providerHint,
+    allLoadedDramas,
+  ]);
 
   const trendingSearchPool = useMemo(() => {
     if (homeCatalog && homeCatalog.trendingTop.length > 0) {
@@ -1763,13 +1961,18 @@ export default function App() {
     return interleaveManyFeeds(dbDubbingFeed.items, freeReelsDub, goodShortDub);
   }, [selectedProvider, dbDubbingFeed.items, extraFeeds]);
 
-  // Watchlist filtered by selected folder & watch status
+  const activeCategoryWatchlistItems = useMemo(
+    () => (watchlistCategory === 'movie' ? movieWatchlistItems : dramaWatchlistItems),
+    [watchlistCategory, movieWatchlistItems, dramaWatchlistItems]
+  );
+
+  // Watchlist filtered by selected category, folder & watch status
   const folderScopedWatchlist = useMemo(() => {
-    if (activeFolderId === 'all') return myListItems;
-    return myListItems.filter(
+    if (activeFolderId === 'all') return activeCategoryWatchlistItems;
+    return activeCategoryWatchlistItems.filter(
       (d) => getDramaFolderId(d.bookId, d.provider) === activeFolderId
     );
-  }, [myListItems, activeFolderId, getDramaFolderId]);
+  }, [activeCategoryWatchlistItems, activeFolderId, getDramaFolderId]);
 
   const watchStatusCounts = useMemo(() => {
     let watching = 0;
@@ -2293,8 +2496,12 @@ export default function App() {
       }
       case 'mylist':
         return {
-          title: t.nav.watchlist,
-          items: filteredWatchlistItems,
+          title:
+            watchlistCategory === 'movie'
+              ? t.moviesPage.watchlistTitle
+              : t.sections.dramaWatchlistTitle,
+          items:
+            watchlistCategory === 'movie' && !user ? [] : filteredWatchlistItems,
           loading: false,
           loadingMore: false,
           error: null,
@@ -2309,6 +2516,8 @@ export default function App() {
     }
   }, [
     activeTab,
+    watchlistCategory,
+    user,
     selectedProvider,
     t,
     dbRankingFeed,
@@ -2350,11 +2559,21 @@ export default function App() {
         onSelectTab={handleNavigateTab}
         languageLoading={languageLoading}
         onChangeLanguage={handleChangeLanguage}
-        onOpenSearchModal={() => setSearchModalOpen(true)}
+        onOpenSearchModal={handleOpenSearch}
+      />
+
+      <DesktopSidebar
+        activeTab={activeTab}
+        selectedProvider={selectedProvider}
+        hasActiveSubRoute={Boolean(activeDramaRoute || activeSeoLanding)}
+        onSelectTab={handleNavigateTab}
+        onOpenProviderHub={handleOpenProviderHub}
       />
 
       {/* Native-feel PWA Install Bottom-Sheet / Modal */}
       <PWAInstallButton variant="banner" playerOpen={Boolean(playerState)} />
+
+      <div className="flex-1 flex flex-col md:pl-[72px] lg:pl-[216px] min-w-0">
 
       {activeDramaRoute ? (
         <main className="flex-1">
@@ -2421,6 +2640,26 @@ export default function App() {
                   handlePlayEpisode(d, ep, [], resumeTimeSec)
                 }
                 onBackToHome={() => handleNavigateTab('home')}
+                initialSubTab={dashboardSubTab}
+                initialWatchlistCategory={dashboardWatchlistCategory}
+              />
+            </Suspense>
+          ) : activeTab === 'movies' ? (
+            <Suspense
+              fallback={
+                <div className="max-w-[1440px] mx-auto px-4 md:px-8 py-8 space-y-8">
+                  <CarouselSkeleton />
+                  <CarouselSkeleton />
+                </div>
+              }
+            >
+              <MoviesView
+                myListIds={myListIds}
+                onSelectMovie={openDramaRoute}
+                onQuickPlayMovie={(m) => handlePlayEpisode(m, 1)}
+                onToggleMyList={toggleMyList}
+                onSelectTag={openTagRoute}
+                onMoviesPoolChange={setMoviesPool}
               />
             </Suspense>
           ) : activeTab === 'explore' ? (
@@ -2462,7 +2701,7 @@ export default function App() {
                 onSelectDrama={openDramaRoute}
                 onQuickPlay={(d) => handlePlayEpisode(d, 1)}
                 onToggleMyList={toggleMyList}
-                onOpenProviderHub={() => setProviderHubOpen(true)}
+                onOpenProviderHub={handleOpenProviderHub}
                 onRetryCore={() => void fetchAllFeeds()}
                 onRetryFeed={(prov, kind) => {
                   if (prov === 'DramaBox' && kind === 'rank') {
@@ -2552,6 +2791,20 @@ export default function App() {
                     <Compass className="w-3.5 h-3.5" />
                     <span>{t.nav.explore}</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWatchlistCategory('drama');
+                      handleNavigateTab('mylist');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 min-h-[38px] rounded-full bg-[#141418] border border-white/15 hover:border-[var(--cd-accent)] text-xs font-semibold text-white whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    <Bookmark className="w-3.5 h-3.5 cd-accent-text" />
+                    <span>
+                      {t.sections.dramaWatchlistTitle}
+                      {dramaWatchlistItems.length > 0 ? ` (${dramaWatchlistItems.length})` : ''}
+                    </span>
+                  </button>
                 </div>
               </section>
 
@@ -2586,7 +2839,7 @@ export default function App() {
                   continueEpisodesMap={continueWatchingData.map}
                   myListIds={myListIds}
                   onRetry={() => {}}
-                  onSeeAll={() => handleNavigateTab('mylist')}
+                  onSeeAll={() => handleNavigateTab('dashboard')}
                   onSelectDrama={openDramaRoute}
                   onQuickPlay={(d) => {
                     const saved =
@@ -2768,7 +3021,7 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {activeTab === 'mylist' && (
+                  {activeTab === 'mylist' && (watchlistCategory === 'drama' || user) && (
                     <button
                       type="button"
                       onClick={() => setNewFolderOpen((p) => !p)}
@@ -2789,8 +3042,94 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Custom Watchlist Folders Toolbar */}
+              {/* Separated Drama Watchlist & Movie Watchlist Switcher */}
               {activeTab === 'mylist' && (
+                <div
+                  className="mb-5 inline-flex flex-wrap items-center gap-2 p-1 rounded-2xl bg-[#111015] border border-white/10"
+                  role="tablist"
+                  aria-label="Watchlist categories"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={watchlistCategory === 'drama'}
+                    onClick={() => {
+                      setWatchlistCategory('drama');
+                      setActiveFolderId('all');
+                      setWatchStatusFilter('all');
+                    }}
+                    className={`inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                      watchlistCategory === 'drama'
+                        ? 'cd-accent-bg text-white shadow-md'
+                        : 'text-[#A1A1AA] hover:text-white'
+                    }`}
+                  >
+                    <Bookmark className="w-4 h-4" />
+                    <span>
+                      {t.sections.dramaWatchlistTitle} ({dramaWatchlistItems.length})
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={watchlistCategory === 'movie'}
+                    onClick={() => {
+                      setWatchlistCategory('movie');
+                      setActiveFolderId('all');
+                      setWatchStatusFilter('all');
+                    }}
+                    className={`inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                      watchlistCategory === 'movie'
+                        ? 'cd-accent-bg text-white shadow-md'
+                        : 'text-[#A1A1AA] hover:text-white'
+                    }`}
+                  >
+                    <Clapperboard className="w-4 h-4" />
+                    <span>
+                      {t.moviesPage.watchlistTitle} ({user ? movieWatchlistItems.length : 0})
+                    </span>
+                    {!user && <Lock className="w-3.5 h-3.5 opacity-80" />}
+                  </button>
+                </div>
+              )}
+
+              {/* Login Required Gate for Movie Watchlist */}
+              {activeTab === 'mylist' && watchlistCategory === 'movie' && !user ? (
+                <div className="my-10 p-8 sm:p-10 rounded-3xl bg-[var(--cd-surface)] border border-white/10 text-center max-w-lg mx-auto space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-[var(--cd-accent-soft)] border border-[var(--cd-accent)]/40 flex items-center justify-center mx-auto cd-accent-text">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h2 className="text-lg sm:text-xl font-bold text-white">
+                      {t.moviesPage.watchlistLoginTitle}
+                    </h2>
+                    <p className="text-xs sm:text-sm text-[#A1A1AA] leading-relaxed">
+                      {t.moviesPage.watchlistLoginDesc}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => openAuthModal(t.auth.gateWatchlistReason)}
+                      className="px-6 py-2.5 min-h-[44px] rounded-full cd-accent-bg text-xs sm:text-sm font-bold text-white shadow-lg"
+                    >
+                      {t.auth.continueBtn}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNavigateTab('movies')}
+                      className="px-5 py-2.5 min-h-[44px] rounded-full bg-[#18181D] border border-white/15 hover:border-white/30 text-xs sm:text-sm font-semibold text-white inline-flex items-center gap-1.5"
+                    >
+                      <Clapperboard className="w-4 h-4 cd-accent-text" />
+                      <span>{t.moviesPage.browseMoviesBtn}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+              {/* Custom Watchlist Folders Toolbar */}
+              {activeTab === 'mylist' && (watchlistCategory === 'drama' || user) && (
                 <div className="mb-6 space-y-3">
                   {newFolderOpen && (
                     <form
@@ -2876,8 +3215,8 @@ export default function App() {
                       const active = activeFolderId === folder.id;
                       const folderCount =
                         folder.id === 'all'
-                          ? myListItems.length
-                          : myListItems.filter(
+                          ? activeCategoryWatchlistItems.length
+                          : activeCategoryWatchlistItems.filter(
                               (d) =>
                                 getDramaFolderId(d.bookId, d.provider) ===
                                 folder.id
@@ -2962,7 +3301,9 @@ export default function App() {
               ) : activeGridInfo.items.length === 0 ? (
                 <div className="my-12 p-10 rounded-2xl bg-[var(--cd-surface)] border border-white/10 text-center max-w-lg mx-auto">
                   <div className="w-12 h-12 rounded-xl bg-[#1C1C22] border border-white/10 flex items-center justify-center mx-auto mb-4 cd-accent-text">
-                    {activeTab === 'mylist' ? (
+                    {activeTab === 'mylist' && watchlistCategory === 'movie' ? (
+                      <Clapperboard className="w-5 h-5" />
+                    ) : activeTab === 'mylist' ? (
                       <Bookmark className="w-5 h-5" />
                     ) : (
                       <Film className="w-5 h-5" />
@@ -2970,12 +3311,43 @@ export default function App() {
                   </div>
                   <h2 className="text-lg font-bold text-white">
                     {activeTab === 'mylist'
-                      ? `${t.nav.watchlist} is empty`
+                      ? `${
+                          watchlistCategory === 'movie'
+                            ? t.moviesPage.watchlistTitle
+                            : t.sections.dramaWatchlistTitle
+                        } is empty`
                       : t.search.noResults}
                   </h2>
                   <p className="text-sm text-[#A1A1AA] mt-2 leading-relaxed">
-                    {t.search.tryAnother}
+                    {activeTab === 'mylist'
+                      ? watchlistCategory === 'movie'
+                        ? t.moviesPage.watchlistEmpty
+                        : t.sections.dramaWatchlistEmpty
+                      : t.search.tryAnother}
                   </p>
+                  {activeTab === 'mylist' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleNavigateTab(
+                          watchlistCategory === 'movie' ? 'movies' : 'home'
+                        )
+                      }
+                      className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 min-h-[44px] rounded-full cd-accent-bg text-xs sm:text-sm font-bold text-white shadow-lg"
+                    >
+                      {watchlistCategory === 'movie' ? (
+                        <>
+                          <Clapperboard className="w-4 h-4" />
+                          <span>{t.moviesPage.browseMoviesBtn}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bookmark className="w-4 h-4" />
+                          <span>{t.sections.exploreDramasBtn}</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
@@ -3068,87 +3440,105 @@ export default function App() {
                   )}
                 </>
               )}
+                </>
+              )}
             </section>
           )}
         </main>
       )}
 
       <Footer />
+      </div>
 
-      {/* 5-Tab Sticky Mobile Bottom Navigation with Elevated Center "Providers" Button */}
+      {/* 5-Tab Sticky Mobile Bottom Navigation: Home -> Search -> Provider -> Movie -> Login */}
       <nav
         className="md:hidden fixed bottom-0 inset-x-0 z-40 h-14 bg-[var(--cd-bg)]/95 backdrop-blur-xl border-t border-white/10 grid grid-cols-5 items-center pb-[env(safe-area-inset-bottom)]"
         aria-label="Mobile Bottom Navigation"
       >
+        {/* 1. Home (/ or /drama) */}
         <button
           type="button"
           onClick={() => handleNavigateTab('home')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] text-[10px] font-medium transition-colors ${
+          aria-label={t.nav.home}
+          className={`flex flex-col items-center justify-center gap-0.5 w-full h-full min-h-[44px] text-[10px] font-medium transition-colors ${
             !activeDramaRoute &&
             !activeSeoLanding &&
             activeTab === 'home' &&
             !searchModalOpen &&
-            !providerHubOpen
+            !providerHubOpen &&
+            !authModalOpen
               ? 'cd-accent-text'
               : 'text-[#A1A1AA] hover:text-white'
           }`}
         >
           <Home className="w-4 h-4" />
-          <span>{t.nav.home}</span>
+          <span className="truncate max-w-[60px]">{t.nav.home}</span>
         </button>
 
+        {/* 2. Search (/search) */}
         <button
           type="button"
-          onClick={() => setSearchModalOpen(true)}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] text-[10px] font-medium transition-colors ${
+          onClick={handleOpenSearch}
+          aria-label={t.nav.search}
+          className={`flex flex-col items-center justify-center gap-0.5 w-full h-full min-h-[44px] text-[10px] font-medium transition-colors ${
             searchModalOpen
               ? 'cd-accent-text'
               : 'text-[#A1A1AA] hover:text-white'
           }`}
         >
           <Search className="w-4 h-4" />
-          <span>{t.nav.search}</span>
+          <span className="truncate max-w-[60px]">{t.nav.search}</span>
         </button>
 
-        {/* Center Elevated Providers Button */}
-        <div className="flex items-center justify-center">
-          <button
-            type="button"
-            onClick={() => setProviderHubOpen(true)}
-            aria-label={t.nav.providers}
-            className={`-mt-4 w-12 h-12 rounded-2xl border flex flex-col items-center justify-center shadow-xl transition-transform active:scale-95 ${
-              providerHubOpen || selectedProvider !== 'All'
-                ? 'cd-accent-bg border-white/25 text-white'
-                : 'bg-[#18181D] border-white/20 text-white'
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            <span className="text-[9px] font-bold leading-none mt-0.5">
-              {selectedProvider === 'All'
-                ? t.nav.providers
-                : selectedProvider.slice(0, 6)}
-            </span>
-          </button>
-        </div>
-
+        {/* 3. Provider (Opens Provider Hub modal/drawer) */}
         <button
           type="button"
-          onClick={() => handleNavigateTab('mylist')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] text-[10px] font-medium transition-colors ${
-            !activeDramaRoute && activeTab === 'mylist'
+          onClick={handleOpenProviderHub}
+          aria-label={t.nav.providers}
+          className={`flex flex-col items-center justify-center gap-0.5 w-full h-full min-h-[44px] text-[10px] font-semibold transition-colors ${
+            providerHubOpen || selectedProvider !== 'All'
               ? 'cd-accent-text'
               : 'text-[#A1A1AA] hover:text-white'
           }`}
         >
-          <Bookmark className="w-4 h-4" />
-          <span>{t.nav.watchlist}</span>
+          <Layers className="w-4 h-4" />
+          <span className="truncate max-w-[60px]">
+            {selectedProvider === 'All'
+              ? t.nav.providers
+              : selectedProvider.slice(0, 7)}
+          </span>
         </button>
 
+        {/* 4. Movie (/movies) */}
         <button
           type="button"
-          onClick={() => openAuthModal()}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] text-[10px] font-medium transition-colors ${
-            authModalOpen
+          onClick={() => handleNavigateTab('movies')}
+          aria-label={t.nav.movies}
+          className={`flex flex-col items-center justify-center gap-0.5 w-full h-full min-h-[44px] text-[10px] font-semibold transition-colors ${
+            !activeDramaRoute &&
+            !activeSeoLanding &&
+            activeTab === 'movies' &&
+            !searchModalOpen &&
+            !providerHubOpen &&
+            !authModalOpen
+              ? 'cd-accent-text'
+              : 'text-[#A1A1AA] hover:text-white'
+          }`}
+        >
+          <Clapperboard className="w-4 h-4" />
+          <span className="truncate max-w-[60px]">{t.nav.movies}</span>
+        </button>
+
+        {/* 5. Login (Profile / Auth & Integrated Movie Watchlist) */}
+        <button
+          type="button"
+          onClick={handleOpenLoginMenu}
+          aria-label={user ? t.nav.account : t.nav.login}
+          className={`flex flex-col items-center justify-center gap-0.5 w-full h-full min-h-[44px] text-[10px] font-medium transition-colors ${
+            authModalOpen ||
+            (!searchModalOpen &&
+              !providerHubOpen &&
+              (activeTab === 'dashboard' || activeTab === 'mylist'))
               ? 'cd-accent-text'
               : 'text-[#A1A1AA] hover:text-white'
           }`}
@@ -3161,22 +3551,22 @@ export default function App() {
                   alt={user.displayName}
                   referrerPolicy="no-referrer"
                   onError={() => setMobileAvatarBroken(true)}
-                  className="w-5 h-5 rounded-full object-cover border border-white/25"
+                  className="w-4 h-4 rounded-full object-cover border border-white/25"
                 />
               ) : (
                 <span
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-extrabold text-white border border-white/25"
+                  className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-extrabold text-white border border-white/25"
                   style={{ backgroundColor: user.avatarColor }}
                 >
                   {user.avatarInitials}
                 </span>
               )}
-              <span className="truncate max-w-[56px]">{t.nav.account}</span>
+              <span className="truncate max-w-[60px]">{t.nav.account}</span>
             </>
           ) : (
             <>
               <User className="w-4 h-4" />
-              <span>{t.nav.login}</span>
+              <span className="truncate max-w-[60px]">{t.nav.login}</span>
             </>
           )}
         </button>
@@ -3241,6 +3631,13 @@ export default function App() {
               setSelectedProvider(prov);
               if (activeDramaRoute) closeDramaRoute();
               if (activeSeoLanding) closeSeoLandingRoute();
+              if (
+                activeTab === 'movies' ||
+                activeTab === 'mylist' ||
+                activeTab === 'dashboard'
+              ) {
+                handleNavigateTab('home');
+              }
             }}
             onClose={() => setProviderHubOpen(false)}
           />
@@ -3249,7 +3646,7 @@ export default function App() {
         {searchModalOpen && (
           <SearchModal
             open={searchModalOpen}
-            onClose={() => setSearchModalOpen(false)}
+            onClose={handleCloseSearch}
             onSelectDrama={openDramaRoute}
             onQuickPlay={(d) => handlePlayEpisode(d, 1)}
             trendingDramas={trendingSearchPool}
@@ -3262,7 +3659,11 @@ export default function App() {
             episodeNumber={playerState?.episode ?? 1}
             initialTime={playerState?.initialTime ?? 0}
             episodes={playerState?.episodes ?? []}
-            relatedDramas={allLoadedDramas}
+            relatedDramas={
+              playerState?.drama?.provider === 'LK21' && moviesPool.length > 0
+                ? moviesPool
+                : allLoadedDramas
+            }
             onSwitchDrama={(nextDrama, ep = 1) => {
               handlePlayEpisode(nextDrama, ep, []);
             }}
@@ -3282,7 +3683,11 @@ export default function App() {
                   activeDramaRoute.episodes,
                   language
                 );
-              } else if (activeDrama && window.location.pathname.startsWith('/drama/')) {
+              } else if (
+                activeDrama &&
+                (window.location.pathname.startsWith('/drama/') ||
+                  window.location.pathname.startsWith('/movie/'))
+              ) {
                 syncDramaDocumentSeo(activeDrama, playerState?.episodes ?? [], language);
               } else {
                 syncSectionDocumentSeo(activeTab);

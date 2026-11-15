@@ -250,6 +250,7 @@ const SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE comments ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'drama'`,
   `ALTER TABLE likes ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'drama'`,
   `ALTER TABLE favorites ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'drama'`,
+  `CREATE INDEX IF NOT EXISTS idx_favorites_user_media ON favorites (user_id, media_type, created_at DESC)`,
   `ALTER TABLE video_stats ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'drama'`,
   `ALTER TABLE watch_history ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'drama'`,
   `CREATE INDEX IF NOT EXISTS idx_watch_history_media_type ON watch_history (user_id, media_type, updated_at DESC)`,
@@ -298,6 +299,26 @@ const SCHEMA_STATEMENTS: string[] = [
     PRIMARY KEY (slug, episode_number)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_movie_episodes_vid ON movie_episodes (vid)`,
+
+  `CREATE TABLE IF NOT EXISTS movie_sources (
+    id SERIAL PRIMARY KEY,
+    slug TEXT NOT NULL,
+    episode_number INTEGER NOT NULL DEFAULT 1,
+    vid TEXT NOT NULL DEFAULT '',
+    source_name TEXT NOT NULL DEFAULT 'LK21',
+    source_type TEXT NOT NULL DEFAULT 'hls',
+    quality TEXT NOT NULL DEFAULT 'HD',
+    stream_url TEXT NOT NULL DEFAULT '',
+    raw_url TEXT NOT NULL DEFAULT '',
+    embed_url TEXT NOT NULL DEFAULT '',
+    subtitles_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (slug, episode_number, source_name, quality)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_movie_sources_slug ON movie_sources (slug, episode_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_movie_sources_vid ON movie_sources (vid)`,
 
   `CREATE TABLE IF NOT EXISTS lk21_cache (
     cache_key TEXT PRIMARY KEY,
@@ -697,6 +718,7 @@ export async function createCommentInDb(input: {
   videoTimestampSec?: number;
 }): Promise<DbCommentRecord | null> {
   const safeTs = Math.max(0, Math.floor(Number(input.videoTimestampSec) || 0));
+  const mediaType = input.provider === 'LK21' ? 'movie' : 'drama';
   const res = await dbQuery<{
     id: string;
     drama_id: string;
@@ -714,10 +736,10 @@ export async function createCommentInDb(input: {
     created_at: Date;
   }>(
     `INSERT INTO comments (
-       id, drama_id, provider, episode_number, user_id, author_name, author_email,
+       id, drama_id, provider, media_type, episode_number, user_id, author_name, author_email,
        author_photo_url, author_badge, author_initials, author_color, content, video_timestamp_sec
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT (id) DO NOTHING
      RETURNING id, drama_id, provider, episode_number, user_id, author_name, author_email,
                author_photo_url, author_badge, author_initials, author_color, content,
@@ -726,6 +748,7 @@ export async function createCommentInDb(input: {
       input.id,
       input.dramaId,
       input.provider,
+      mediaType,
       input.episodeNumber,
       input.userId || null,
       input.authorName.slice(0, 120),
@@ -741,11 +764,11 @@ export async function createCommentInDb(input: {
 
   // Atomically update comment count in video_stats (best-effort)
   void dbQuery(
-    `INSERT INTO video_stats (drama_id, provider, episode_number, stat_date, comments_count, updated_at)
-     VALUES ($1, $2, $3, CURRENT_DATE, 1, NOW())
+    `INSERT INTO video_stats (drama_id, provider, media_type, episode_number, stat_date, comments_count, updated_at)
+     VALUES ($1, $2, $3, $4, CURRENT_DATE, 1, NOW())
      ON CONFLICT (drama_id, provider, episode_number, stat_date)
-     DO UPDATE SET comments_count = video_stats.comments_count + 1, updated_at = NOW()`,
-    [input.dramaId, input.provider, input.episodeNumber]
+     DO UPDATE SET comments_count = video_stats.comments_count + 1, media_type = EXCLUDED.media_type, updated_at = NOW()`,
+    [input.dramaId, input.provider, mediaType, input.episodeNumber]
   ).catch(() => {});
 
   const r = res?.rows[0];
@@ -811,6 +834,7 @@ export async function toggleLikeInDb(
     [userId, dramaId, provider]
   );
 
+  const mediaType = provider === 'LK21' ? 'movie' : 'drama';
   let liked = false;
   if (existing && existing.rows.length > 0) {
     await dbQuery(
@@ -820,10 +844,10 @@ export async function toggleLikeInDb(
     liked = false;
   } else {
     await dbQuery(
-      `INSERT INTO likes (user_id, drama_id, provider)
-       VALUES ($1, $2, $3)
+      `INSERT INTO likes (user_id, drama_id, provider, media_type)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, drama_id, provider) DO NOTHING`,
-      [userId, dramaId, provider]
+      [userId, dramaId, provider, mediaType]
     );
     liked = true;
   }
@@ -835,11 +859,11 @@ export async function toggleLikeInDb(
   const likesCount = Number(countRes?.rows[0]?.cnt ?? (liked ? 1 : 0));
 
   void dbQuery(
-    `INSERT INTO video_stats (drama_id, provider, episode_number, stat_date, likes_count, updated_at)
-     VALUES ($1, $2, 0, CURRENT_DATE, $3, NOW())
+    `INSERT INTO video_stats (drama_id, provider, media_type, episode_number, stat_date, likes_count, updated_at)
+     VALUES ($1, $2, $3, 0, CURRENT_DATE, $4, NOW())
      ON CONFLICT (drama_id, provider, episode_number, stat_date)
-     DO UPDATE SET likes_count = $3, updated_at = NOW()`,
-    [dramaId, provider, likesCount]
+     DO UPDATE SET likes_count = $4, media_type = EXCLUDED.media_type, updated_at = NOW()`,
+    [dramaId, provider, mediaType, likesCount]
   ).catch(() => {});
 
   return { liked, likesCount };
@@ -848,11 +872,13 @@ export async function toggleLikeInDb(
 export async function listFavoritesFromDb(
   userId: string,
   limitCount = 100,
-  offsetCount = 0
+  offsetCount = 0,
+  mediaType?: 'movie' | 'drama'
 ): Promise<{
   items: Array<{
     dramaId: string;
     provider: string;
+    mediaType: 'movie' | 'drama';
     folderId: string;
     drama: Record<string, unknown>;
     createdAt: number;
@@ -861,20 +887,28 @@ export async function listFavoritesFromDb(
 }> {
   const safeLimit = Math.min(200, Math.max(1, Math.floor(limitCount)));
   const safeOffset = Math.max(0, Math.floor(offsetCount));
+  const whereClause = mediaType
+    ? 'WHERE user_id = $1 AND media_type = $4'
+    : 'WHERE user_id = $1';
+  const params: unknown[] = mediaType
+    ? [userId, safeLimit, safeOffset, mediaType]
+    : [userId, safeLimit, safeOffset];
+
   const res = await dbQuery<{
     drama_id: string;
     provider: string;
+    media_type: string;
     folder_id: string;
     drama_json: Record<string, unknown>;
     created_at: Date;
     total_count: string;
   }>(
-    `SELECT drama_id, provider, folder_id, drama_json, created_at, COUNT(*) OVER()::text AS total_count
+    `SELECT drama_id, provider, media_type, folder_id, drama_json, created_at, COUNT(*) OVER()::text AS total_count
      FROM favorites
-     WHERE user_id = $1
+     ${whereClause}
      ORDER BY created_at DESC
      LIMIT $2 OFFSET $3`,
-    [userId, safeLimit, safeOffset]
+    params
   );
 
   if (!res || res.rows.length === 0) return { items: [], total: 0 };
@@ -883,6 +917,7 @@ export async function listFavoritesFromDb(
     items: res.rows.map((r) => ({
       dramaId: r.drama_id,
       provider: r.provider,
+      mediaType: r.media_type === 'movie' || r.provider === 'LK21' ? 'movie' : 'drama',
       folderId: r.folder_id || 'all',
       drama: r.drama_json || {},
       createdAt: r.created_at instanceof Date ? r.created_at.getTime() : Date.now(),
@@ -895,43 +930,52 @@ export async function toggleFavoriteInDb(input: {
   userId: string;
   dramaId: string;
   provider: string;
+  mediaType?: 'movie' | 'drama';
   folderId?: string;
   title?: string;
   cover?: string;
   drama?: Record<string, unknown>;
   forceSave?: boolean;
-}): Promise<{ saved: boolean; folderId: string }> {
+}): Promise<{ saved: boolean; folderId: string; mediaType: 'movie' | 'drama' }> {
   const existing = await dbQuery<{ folder_id: string }>(
     'SELECT folder_id FROM favorites WHERE user_id = $1 AND drama_id = $2 AND provider = $3',
     [input.userId, input.dramaId, input.provider]
   );
+
+  const mediaType: 'movie' | 'drama' =
+    input.mediaType === 'movie' || input.mediaType === 'drama'
+      ? input.mediaType
+      : input.provider === 'LK21'
+      ? 'movie'
+      : 'drama';
 
   if (existing && existing.rows.length > 0 && !input.forceSave) {
     await dbQuery(
       'DELETE FROM favorites WHERE user_id = $1 AND drama_id = $2 AND provider = $3',
       [input.userId, input.dramaId, input.provider]
     );
-    return { saved: false, folderId: 'all' };
+    return { saved: false, folderId: 'all', mediaType };
   }
 
   const folderId = (input.folderId || existing?.rows[0]?.folder_id || 'all').slice(0, 64);
   const title = (input.title || '').slice(0, 240);
   const cover = (input.cover || '').slice(0, 1000);
-  const dramaJson = JSON.stringify(input.drama || { bookId: input.dramaId, provider: input.provider, title, cover });
+  const dramaJson = JSON.stringify(input.drama || { bookId: input.dramaId, provider: input.provider, title, cover, mediaType });
 
   await dbQuery(
-    `INSERT INTO favorites (user_id, drama_id, provider, folder_id, title, cover, drama_json, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW(), NOW())
+    `INSERT INTO favorites (user_id, drama_id, provider, media_type, folder_id, title, cover, drama_json, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW(), NOW())
      ON CONFLICT (user_id, drama_id, provider) DO UPDATE SET
+       media_type = EXCLUDED.media_type,
        folder_id = EXCLUDED.folder_id,
        title = CASE WHEN EXCLUDED.title <> '' THEN EXCLUDED.title ELSE favorites.title END,
        cover = CASE WHEN EXCLUDED.cover <> '' THEN EXCLUDED.cover ELSE favorites.cover END,
        drama_json = EXCLUDED.drama_json,
        updated_at = NOW()`,
-    [input.userId, input.dramaId, input.provider, folderId, title, cover, dramaJson]
+    [input.userId, input.dramaId, input.provider, mediaType, folderId, title, cover, dramaJson]
   );
 
-  return { saved: true, folderId };
+  return { saved: true, folderId, mediaType };
 }
 
 export async function updateFavoriteFolderInDb(
@@ -954,29 +998,32 @@ export async function recordVideoViewInDb(
   episodeNumber = 1
 ): Promise<{ dailyViews: number; totalViews: number; siteTotalViews: number }> {
   const safeEp = Math.max(1, Math.floor(Number(episodeNumber) || 1));
+  const mediaType = provider === 'LK21' ? 'movie' : 'drama';
 
   // Update both episode-level (episode_number = safeEp) and drama-level aggregate (episode_number = 0)
   const epRes = await dbQuery<{ daily_views: string; total_views: string }>(
-    `INSERT INTO video_stats (drama_id, provider, episode_number, stat_date, daily_views, total_views, updated_at)
-     VALUES ($1, $2, $3, CURRENT_DATE, 1, 1, NOW())
+    `INSERT INTO video_stats (drama_id, provider, media_type, episode_number, stat_date, daily_views, total_views, updated_at)
+     VALUES ($1, $2, $3, $4, CURRENT_DATE, 1, 1, NOW())
      ON CONFLICT (drama_id, provider, episode_number, stat_date)
      DO UPDATE SET
+       media_type = EXCLUDED.media_type,
        daily_views = video_stats.daily_views + 1,
        total_views = video_stats.total_views + 1,
        updated_at = NOW()
      RETURNING daily_views::text, total_views::text`,
-    [dramaId, provider, safeEp]
+    [dramaId, provider, mediaType, safeEp]
   );
 
   await dbQuery(
-    `INSERT INTO video_stats (drama_id, provider, episode_number, stat_date, daily_views, total_views, updated_at)
-     VALUES ($1, $2, 0, CURRENT_DATE, 1, 1, NOW())
+    `INSERT INTO video_stats (drama_id, provider, media_type, episode_number, stat_date, daily_views, total_views, updated_at)
+     VALUES ($1, $2, $3, 0, CURRENT_DATE, 1, 1, NOW())
      ON CONFLICT (drama_id, provider, episode_number, stat_date)
      DO UPDATE SET
+       media_type = EXCLUDED.media_type,
        daily_views = video_stats.daily_views + 1,
        total_views = video_stats.total_views + 1,
        updated_at = NOW()`,
-    [dramaId, provider]
+    [dramaId, provider, mediaType]
   );
 
   // Also bump global site total_views (starting from 0)
@@ -2390,5 +2437,136 @@ export async function listMoviesForSitemapFromDb(limit = 2000): Promise<
     updatedAt: r.updated_at instanceof Date ? r.updated_at.getTime() : Date.now(),
   }));
 }
+export interface MovieSourceUpsertInput {
+  slug: string;
+  episodeNumber?: number;
+  vid?: string;
+  sourceName: string;
+  sourceType?: string;
+  quality?: string;
+  streamUrl?: string;
+  rawUrl?: string;
+  embedUrl?: string;
+  subtitles?: Array<Record<string, unknown>>;
+  headers?: Record<string, unknown>;
+  isActive?: boolean;
+}
 
+export async function upsertMovieSourcesInDb(
+  sources: MovieSourceUpsertInput[]
+): Promise<void> {
+  if (!sources || sources.length === 0) return;
+  for (const src of sources) {
+    const cleanSlug = (src.slug || '').trim().toLowerCase().slice(0, 180);
+    const epNum = Math.max(1, Math.floor(src.episodeNumber || 1));
+    const sourceName = (src.sourceName || 'LK21').trim().slice(0, 80) || 'LK21';
+    const quality = (src.quality || 'HD').trim().slice(0, 48) || 'HD';
+    if (!cleanSlug) continue;
+    await dbQuery(
+      `INSERT INTO movie_sources (
+         slug, episode_number, vid, source_name, source_type, quality,
+         stream_url, raw_url, embed_url, subtitles_json, headers_json, is_active, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, NOW())
+       ON CONFLICT (slug, episode_number, source_name, quality) DO UPDATE SET
+         vid = CASE WHEN EXCLUDED.vid <> '' THEN EXCLUDED.vid ELSE movie_sources.vid END,
+         source_type = CASE WHEN EXCLUDED.source_type <> '' THEN EXCLUDED.source_type ELSE movie_sources.source_type END,
+         stream_url = CASE WHEN EXCLUDED.stream_url <> '' THEN EXCLUDED.stream_url ELSE movie_sources.stream_url END,
+         raw_url = CASE WHEN EXCLUDED.raw_url <> '' THEN EXCLUDED.raw_url ELSE movie_sources.raw_url END,
+         embed_url = CASE WHEN EXCLUDED.embed_url <> '' THEN EXCLUDED.embed_url ELSE movie_sources.embed_url END,
+         subtitles_json = CASE WHEN EXCLUDED.subtitles_json <> '[]'::jsonb THEN EXCLUDED.subtitles_json ELSE movie_sources.subtitles_json END,
+         headers_json = movie_sources.headers_json || EXCLUDED.headers_json,
+         is_active = EXCLUDED.is_active,
+         updated_at = NOW()`,
+      [
+        cleanSlug,
+        epNum,
+        (src.vid || cleanSlug).slice(0, 240),
+        sourceName,
+        (src.sourceType || 'hls').slice(0, 32),
+        quality,
+        (src.streamUrl || '').slice(0, 1500),
+        (src.rawUrl || '').slice(0, 1500),
+        (src.embedUrl || '').slice(0, 1500),
+        JSON.stringify(src.subtitles || []),
+        JSON.stringify(src.headers || {}),
+        src.isActive !== false,
+      ]
+    ).catch(() => {});
+  }
+}
 
+export async function getMovieSourcesFromDb(
+  slug: string,
+  episodeNumber?: number
+): Promise<
+  Array<{
+    id: number;
+    slug: string;
+    episodeNumber: number;
+    vid: string;
+    sourceName: string;
+    sourceType: string;
+    quality: string;
+    streamUrl: string;
+    rawUrl: string;
+    embedUrl: string;
+    subtitles: Array<Record<string, unknown>>;
+    headers: Record<string, unknown>;
+    isActive: boolean;
+    updatedAt: number;
+  }>
+> {
+  const clean = slug.trim().toLowerCase();
+  if (!clean) return [];
+  const hasEp = typeof episodeNumber === 'number' && episodeNumber > 0;
+  const res = await dbQuery<{
+    id: number;
+    slug: string;
+    episode_number: number;
+    vid: string;
+    source_name: string;
+    source_type: string;
+    quality: string;
+    stream_url: string;
+    raw_url: string;
+    embed_url: string;
+    subtitles_json: Array<Record<string, unknown>>;
+    headers_json: Record<string, unknown>;
+    is_active: boolean;
+    updated_at: Date;
+  }>(
+    hasEp
+      ? `SELECT id, slug, episode_number, vid, source_name, source_type, quality,
+                stream_url, raw_url, embed_url, subtitles_json, headers_json, is_active, updated_at
+         FROM movie_sources
+         WHERE slug = $1 AND episode_number = $2 AND is_active = TRUE
+         ORDER BY updated_at DESC`
+      : `SELECT id, slug, episode_number, vid, source_name, source_type, quality,
+                stream_url, raw_url, embed_url, subtitles_json, headers_json, is_active, updated_at
+         FROM movie_sources
+         WHERE slug = $1 AND is_active = TRUE
+         ORDER BY episode_number ASC, updated_at DESC`,
+    hasEp ? [clean, Math.floor(episodeNumber!)] : [clean]
+  );
+  if (!res) return [];
+  return res.rows.map((r) => ({
+    id: Number(r.id) || 0,
+    slug: r.slug,
+    episodeNumber: Number(r.episode_number) || 1,
+    vid: r.vid,
+    sourceName: r.source_name,
+    sourceType: r.source_type || 'hls',
+    quality: r.quality || 'HD',
+    streamUrl: r.stream_url,
+    rawUrl: r.raw_url,
+    embedUrl: r.embed_url,
+    subtitles: Array.isArray(r.subtitles_json) ? r.subtitles_json : [],
+    headers:
+      r.headers_json && typeof r.headers_json === 'object'
+        ? r.headers_json
+        : {},
+    isActive: Boolean(r.is_active),
+    updatedAt: r.updated_at instanceof Date ? r.updated_at.getTime() : Date.now(),
+  }));
+}

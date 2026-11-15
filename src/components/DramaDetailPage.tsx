@@ -19,6 +19,11 @@ import {
   Heart,
 } from 'lucide-react';
 import { getProviderAdapter } from '../services/dramaProviders';
+import {
+  fetchLk21Detail,
+  fetchLk21EpisodesAsEpisodeItems,
+  movieToDramaItem,
+} from '../services/movieService';
 import { useDramaContext } from '../context/DramaContext';
 import { ProviderBadge } from './ProviderBadge';
 import { ShareDramaModal } from './ShareDramaModal';
@@ -27,11 +32,11 @@ import {
   getDramaPath,
   syncDramaDocumentSeo,
 } from '../utils/seo';
-import type { DramaItem, EpisodeItem, ProviderName } from '../types/drama';
+import type { DramaItem, EpisodeItem, MediaProviderName } from '../types/drama';
 
 interface DramaDetailPageProps {
   bookId: string;
-  providerHint?: ProviderName;
+  providerHint?: MediaProviderName;
   initialDrama?: DramaItem | null;
   initialEpisodes?: EpisodeItem[];
   onBackHome: () => void;
@@ -72,7 +77,7 @@ export const DramaDetailPage: React.FC<DramaDetailPageProps> = ({
     isEpisodeUnlocked,
   } = useDramaContext();
 
-  const resolvedProvider: ProviderName =
+  const resolvedProvider: MediaProviderName =
     initialDrama?.provider ?? providerHint ?? 'DramaBox';
 
   const [detail, setDetail] = useState<DramaItem | null>(initialDrama);
@@ -93,7 +98,7 @@ export const DramaDetailPage: React.FC<DramaDetailPageProps> = ({
 
   const loadDetailAndEpisodes = async (
     id: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     baseDrama: DramaItem | null
   ) => {
     const reqId = ++activeReqIdRef.current;
@@ -101,6 +106,43 @@ export const DramaDetailPage: React.FC<DramaDetailPageProps> = ({
     setError(null);
 
     try {
+      if (provider === 'LK21' || baseDrama?.mediaType === 'movie') {
+        const [movieRes, epsRes] = await Promise.allSettled([
+          fetchLk21Detail(id),
+          fetchLk21EpisodesAsEpisodeItems(id),
+        ]);
+        if (reqId !== activeReqIdRef.current) return;
+
+        const eps = epsRes.status === 'fulfilled' ? epsRes.value : [];
+        let mergedMovie = baseDrama;
+        if (movieRes.status === 'fulfilled' && movieRes.value) {
+          const converted = movieToDramaItem(movieRes.value, eps.length || 1);
+          mergedMovie = baseDrama
+            ? {
+                ...baseDrama,
+                ...converted,
+                tags:
+                  converted.tags.length > 0 ? converted.tags : baseDrama.tags,
+              }
+            : converted;
+          setDetail(mergedMovie);
+        }
+
+        if (epsRes.status === 'fulfilled') {
+          setEpisodes(eps);
+          if (mergedMovie) {
+            syncDramaDocumentSeo(mergedMovie, eps, language);
+          }
+        } else {
+          setError(
+            epsRes.reason instanceof Error
+              ? epsRes.reason.message
+              : 'Failed to load movie stream list.'
+          );
+        }
+        return;
+      }
+
       const adapter = getProviderAdapter(provider);
       const [detailRes, episodesRes] = await Promise.allSettled([
         adapter.fetchDetail(id),
@@ -351,8 +393,26 @@ export const DramaDetailPage: React.FC<DramaDetailPageProps> = ({
             {/* Clean Typographic Metadata Line */}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#D4D4D8] mb-4">
               <span itemProp="numberOfEpisodes" className="font-semibold cd-accent-text tabular-nums">
-                {totalEpisodeCount} Episodes
+                {detail.mediaType === 'movie' && totalEpisodeCount === 1
+                  ? detail.quality || 'HD Movie'
+                  : `${totalEpisodeCount} Episodes`}
               </span>
+              {detail.year && (
+                <>
+                  <span aria-hidden="true" className="text-[#71717A]">
+                    ·
+                  </span>
+                  <span className="tabular-nums">{detail.year}</span>
+                </>
+              )}
+              {detail.area && (
+                <>
+                  <span aria-hidden="true" className="text-[#71717A]">
+                    ·
+                  </span>
+                  <span>{detail.area}</span>
+                </>
+              )}
               {detail.tags.map((tag) => (
                 <React.Fragment key={tag}>
                   <span aria-hidden="true" className="text-[#71717A]">
@@ -376,6 +436,13 @@ export const DramaDetailPage: React.FC<DramaDetailPageProps> = ({
             >
               {detail.description}
             </p>
+
+            {detail.director && (
+              <p className="text-xs sm:text-sm text-[#A1A1AA] mb-2">
+                <span className="text-white font-medium">Director: </span>
+                {detail.director}
+              </p>
+            )}
 
             {detail.protagonist && (
               <p className="text-xs sm:text-sm text-[#A1A1AA] mb-5">

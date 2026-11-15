@@ -3,12 +3,14 @@ import {
   Bookmark,
   Check,
   CheckCircle2,
+  Clapperboard,
   Clock,
   Crown,
   Flame,
   FolderOpen,
   Heart,
   History,
+  Lock,
   MessageSquare,
   Play,
   Settings,
@@ -22,7 +24,7 @@ import type {
   DramaItem,
   EpisodeComment,
   LanguageCode,
-  ProviderName,
+  MediaProviderName,
   SubtitleStyleConfig,
 } from '../types/drama';
 
@@ -30,6 +32,8 @@ interface UserDashboardProps {
   onSelectDrama: (drama: DramaItem) => void;
   onPlayDrama: (drama: DramaItem, episode?: number, resumeTimeSec?: number) => void;
   onBackToHome: () => void;
+  initialSubTab?: DashboardSubTab;
+  initialWatchlistCategory?: 'movie' | 'drama';
 }
 
 type DashboardSubTab = 'profile' | 'watchlist' | 'history' | 'comments';
@@ -45,6 +49,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onSelectDrama,
   onPlayDrama,
   onBackToHome,
+  initialSubTab = 'profile',
+  initialWatchlistCategory = 'movie',
 }) => {
   const {
     t,
@@ -58,6 +64,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     highContrast,
     subtitleStyle,
     myListItems,
+    dramaWatchlistItems,
+    movieWatchlistItems,
     toggleMyList,
     likedDramaIds,
     watchHistory,
@@ -67,7 +75,38 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     assignDramaToFolder,
   } = useDramaContext();
 
-  const [subTab, setSubTab] = useState<DashboardSubTab>('profile');
+  const [subTab, setSubTab] = useState<DashboardSubTab>(initialSubTab);
+  const [watchlistCategory, setWatchlistCategory] = useState<'movie' | 'drama'>(
+    initialWatchlistCategory
+  );
+
+  useEffect(() => {
+    setSubTab(initialSubTab);
+  }, [initialSubTab]);
+
+  useEffect(() => {
+    setWatchlistCategory(initialWatchlistCategory);
+  }, [initialWatchlistCategory]);
+
+  useEffect(() => {
+    const onNav = (evt: Event) => {
+      const detail = (
+        evt as CustomEvent<{
+          tab?: string;
+          subTab?: DashboardSubTab;
+          watchlistCategory?: 'movie' | 'drama';
+        }>
+      ).detail;
+      if (detail?.tab === 'dashboard' && detail?.subTab) {
+        setSubTab(detail.subTab);
+      }
+      if (detail?.watchlistCategory) {
+        setWatchlistCategory(detail.watchlistCategory);
+      }
+    };
+    window.addEventListener('hd:navigate', onNav);
+    return () => window.removeEventListener('hd:navigate', onNav);
+  }, []);
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
   const [displayNameInput, setDisplayNameInput] = useState<string>(
     user?.displayName || ''
@@ -86,7 +125,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     Array<
       EpisodeComment & {
         dramaId: string;
-        provider: ProviderName;
+        provider: MediaProviderName;
         episodeNumber: number;
       }
     >
@@ -140,10 +179,13 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     }
   };
 
+  const activeCategoryItems =
+    watchlistCategory === 'movie' ? movieWatchlistItems : dramaWatchlistItems;
+
   const filteredWatchlist =
     selectedFolder === 'all'
-      ? myListItems
-      : myListItems.filter(
+      ? activeCategoryItems
+      : activeCategoryItems.filter(
           (d) => getDramaFolderId(d.bookId, d.provider) === selectedFolder
         );
 
@@ -155,7 +197,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     },
     {
       id: 'watchlist',
-      label: `${t.dashboard.tabWatchlist} (${myListItems.length})`,
+      label: `${t.nav.watchlist} (${myListItems.length})`,
       icon: <Bookmark className="w-4 h-4" />,
     },
     {
@@ -242,7 +284,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           <div className="p-3.5 rounded-2xl bg-[#111015] border border-white/5">
             <div className="flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
               <Bookmark className="w-3.5 h-3.5 text-[#D4AF37]" />
-              <span>{t.dashboard.statsWatchlist}</span>
+              <span>{t.nav.watchlist}</span>
             </div>
             <p className="text-2xl font-extrabold text-white mt-1 tabular-nums">
               {myListItems.length}
@@ -477,38 +519,108 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         </form>
       )}
 
-      {/* Sub-Tab 2: Personal Watchlist */}
+      {/* Sub-Tab 2: Separated Movie Watchlist (Login Required) & Drama Watchlist */}
       {subTab === 'watchlist' && (
         <section className="space-y-4">
-          <div className="flex flex-nowrap items-center gap-2 overflow-x-auto scrollbar-none pb-1">
-            {watchlistFolders.map((folder) => {
-              const active = selectedFolder === folder.id;
-              return (
-                <button
-                  key={folder.id}
-                  type="button"
-                  onClick={() => setSelectedFolder(folder.id)}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
-                    active
-                      ? 'cd-accent-bg border-[var(--cd-accent)] text-white'
-                      : 'bg-[var(--cd-surface)] border-white/10 text-[#D4D4D8] hover:border-white/30'
-                  }`}
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                  <span>{folder.name}</span>
-                </button>
-              );
-            })}
+          <div
+            className="inline-flex flex-wrap items-center gap-2 p-1 rounded-2xl bg-[#111015] border border-white/10"
+            role="tablist"
+            aria-label="Watchlist categories"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={watchlistCategory === 'movie'}
+              onClick={() => setWatchlistCategory('movie')}
+              className={`inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs font-bold transition-all ${
+                watchlistCategory === 'movie'
+                  ? 'cd-accent-bg text-white shadow-md'
+                  : 'text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              <Clapperboard className="w-3.5 h-3.5" />
+              <span>
+                {t.moviesPage.watchlistTitle} ({user ? movieWatchlistItems.length : 0})
+              </span>
+              {!user && <Lock className="w-3 h-3 opacity-80" />}
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={watchlistCategory === 'drama'}
+              onClick={() => setWatchlistCategory('drama')}
+              className={`inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs font-bold transition-all ${
+                watchlistCategory === 'drama'
+                  ? 'cd-accent-bg text-white shadow-md'
+                  : 'text-[#A1A1AA] hover:text-white'
+              }`}
+            >
+              <Bookmark className="w-3.5 h-3.5" />
+              <span>
+                {t.sections.dramaWatchlistTitle} ({dramaWatchlistItems.length})
+              </span>
+            </button>
           </div>
 
-          {filteredWatchlist.length === 0 ? (
-            <div className="rounded-3xl bg-[var(--cd-surface)] border border-white/10 p-10 text-center space-y-3">
-              <Bookmark className="w-8 h-8 text-[#71717A] mx-auto" />
-              <p className="text-sm text-[#A1A1AA]">
-                Your Watchlist is empty in this folder. Save any series from the catalog.
-              </p>
+          {watchlistCategory === 'movie' && !user ? (
+            <div className="rounded-3xl bg-[var(--cd-surface)] border border-white/10 p-8 sm:p-10 text-center space-y-4 max-w-lg mx-auto">
+              <div className="w-12 h-12 rounded-2xl bg-[var(--cd-accent-soft)] border border-[var(--cd-accent)]/40 flex items-center justify-center mx-auto cd-accent-text">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-lg font-bold text-white">
+                  {t.moviesPage.watchlistLoginTitle}
+                </h2>
+                <p className="text-xs sm:text-sm text-[#A1A1AA] leading-relaxed">
+                  {t.moviesPage.watchlistLoginDesc}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => openAuthModal(t.auth.gateWatchlistReason)}
+                className="px-6 py-2.5 min-h-[44px] rounded-full cd-accent-bg text-xs sm:text-sm font-bold text-white shadow-lg"
+              >
+                {t.auth.continueBtn}
+              </button>
             </div>
           ) : (
+            <>
+              <div className="flex flex-nowrap items-center gap-2 overflow-x-auto scrollbar-none pb-1">
+                {watchlistFolders.map((folder) => {
+                  const active = selectedFolder === folder.id;
+                  return (
+                    <button
+                      key={folder.id}
+                      type="button"
+                      onClick={() => setSelectedFolder(folder.id)}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                        active
+                          ? 'cd-accent-bg border-[var(--cd-accent)] text-white'
+                          : 'bg-[var(--cd-surface)] border-white/10 text-[#D4D4D8] hover:border-white/30'
+                      }`}
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      <span>{folder.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {filteredWatchlist.length === 0 ? (
+                <div className="rounded-3xl bg-[var(--cd-surface)] border border-white/10 p-10 text-center space-y-3">
+                  {watchlistCategory === 'movie' ? (
+                    <Clapperboard className="w-8 h-8 text-[#71717A] mx-auto" />
+                  ) : (
+                    <Bookmark className="w-8 h-8 text-[#71717A] mx-auto" />
+                  )}
+                  <p className="text-sm text-[#A1A1AA]">
+                    {watchlistCategory === 'movie'
+                      ? t.moviesPage.watchlistEmpty
+                      : t.sections.dramaWatchlistEmpty}
+                  </p>
+                </div>
+              ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredWatchlist.map((drama) => {
                 const currentFolder = getDramaFolderId(drama.bookId, drama.provider);
@@ -589,6 +701,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 );
               })}
             </div>
+          )}
+            </>
           )}
         </section>
       )}

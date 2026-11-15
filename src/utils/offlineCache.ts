@@ -1,4 +1,4 @@
-import type { EpisodeItem, ProviderName, StreamSource } from '../types/drama';
+import type { EpisodeItem, MediaProviderName, StreamSource } from '../types/drama';
 
 const OFFLINE_CACHE_NAME = 'house-drama-episodes-v1';
 const OFFLINE_INDEX_KEY = 'house_drama_offline_index_v1';
@@ -6,13 +6,13 @@ const OFFLINE_INDEX_KEY = 'house_drama_offline_index_v1';
 export interface OfflineCachedEntry {
   key: string;
   bookId: string;
-  provider: ProviderName;
+  provider: MediaProviderName;
   episodeNumber: number;
   title?: string;
   savedAt: number;
 }
 
-function makeKey(bookId: string, provider: ProviderName, episodeNumber: number): string {
+function makeKey(bookId: string, provider: MediaProviderName, episodeNumber: number): string {
   return `${provider}:${bookId}:ep${episodeNumber}`;
 }
 
@@ -30,7 +30,7 @@ export function getOfflineCachedIndex(): Record<string, OfflineCachedEntry> {
 
 export function isEpisodeCachedOffline(
   bookId: string,
-  provider: ProviderName,
+  provider: MediaProviderName,
   episodeNumber: number
 ): boolean {
   const index = getOfflineCachedIndex();
@@ -39,7 +39,7 @@ export function isEpisodeCachedOffline(
 
 export async function cacheEpisodeForOffline(params: {
   bookId: string;
-  provider: ProviderName;
+  provider: MediaProviderName;
   episodeNumber: number;
   title?: string;
   streamSource?: StreamSource | null;
@@ -91,7 +91,7 @@ export async function cacheEpisodeForOffline(params: {
 
 export async function readOfflineCachedEpisode(
   bookId: string,
-  provider: ProviderName,
+  provider: MediaProviderName,
   episodeNumber: number
 ): Promise<{
   streamSource: StreamSource | null;

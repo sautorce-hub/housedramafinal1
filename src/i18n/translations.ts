@@ -3,6 +3,7 @@ import type { LanguageCode, LegalModalTopic } from '../types/drama';
 export interface Translations {
   nav: {
     home: string;
+    movies: string;
     explore: string;
     trending: string;
     latest: string;
@@ -15,6 +16,28 @@ export interface Translations {
     providers: string;
     login: string;
     account: string;
+  };
+  moviesPage: {
+    title: string;
+    subtitle: string;
+    searchPlaceholder: string;
+    allMovies: string;
+    latestMovies: string;
+    categoriesTitle: string;
+    genreFilter: string;
+    countryFilter: string;
+    yearFilter: string;
+    allOption: string;
+    clearFilters: string;
+    noResults: string;
+    loadMore: string;
+    titlesCount: string;
+    watchlistTitle: string;
+    watchlistSubtitle: string;
+    watchlistLoginTitle: string;
+    watchlistLoginDesc: string;
+    watchlistEmpty: string;
+    browseMoviesBtn: string;
   };
   providers: {
     all: string;
@@ -65,6 +88,10 @@ export interface Translations {
     exploreMoreProviders: string;
     pickedForYou: string;
     becauseYouWatched: string;
+    dramaWatchlistTitle: string;
+    dramaWatchlistSubtitle: string;
+    dramaWatchlistEmpty: string;
+    exploreDramasBtn: string;
   };
   search: {
     title: string;
@@ -112,6 +139,15 @@ export interface Translations {
     audioTrack: string;
     offlineCached: string;
     nextEpisodeIn: string;
+    rewind10s: string;
+    forward10s: string;
+    zoomFill: string;
+    zoomFit: string;
+    pinchHint: string;
+    saveMovie: string;
+    savedMovie: string;
+    saveDrama: string;
+    savedDrama: string;
   };
   auth: {
     signInTitle: string;
@@ -119,6 +155,7 @@ export interface Translations {
     gateReasonDefault: string;
     gateLikeReason: string;
     gateCommentReason: string;
+    gateWatchlistReason: string;
     continueBtn: string;
     signingIn: string;
     authErrorPopupBlocked: string;
@@ -126,6 +163,7 @@ export interface Translations {
     signedInAs: string;
     likedCount: string;
     savedCount: string;
+    dramaWatchlistCount: string;
     openHelpCenter: string;
     signOut: string;
   };
@@ -292,6 +330,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
   en: {
     nav: {
       home: 'Home',
+      movies: 'Movies',
       explore: 'Explore',
       trending: 'Trending',
       latest: 'Latest',
@@ -304,6 +343,28 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       providers: 'Providers',
       login: 'Login',
       account: 'Account',
+    },
+    moviesPage: {
+      title: 'Movies & Cinema',
+      subtitle: 'Stream feature films, box office hits, Asian cinema, and full series in crisp HD.',
+      searchPlaceholder: 'Search movies or series titles...',
+      allMovies: 'Featured Movies',
+      latestMovies: 'Latest Movies',
+      categoriesTitle: 'Browse Categories',
+      genreFilter: 'Genre',
+      countryFilter: 'Country',
+      yearFilter: 'Year',
+      allOption: 'All',
+      clearFilters: 'Reset',
+      noResults: 'No movies matched your query or filter.',
+      loadMore: 'Load more movies',
+      titlesCount: 'movies',
+      watchlistTitle: 'Movie Watchlist',
+      watchlistSubtitle: 'Your personal collection of saved films synced to your account.',
+      watchlistLoginTitle: 'Sign In to Access Movie Watchlist',
+      watchlistLoginDesc: 'Create your personal movie collection and sync saved films across all your devices.',
+      watchlistEmpty: 'Your Movie Watchlist is empty. Save any film from the Movies catalog.',
+      browseMoviesBtn: 'Browse Movies',
     },
     providers: {
       all: 'All Providers',
@@ -354,6 +415,10 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       exploreMoreProviders: 'Load More Providers',
       pickedForYou: 'Picked For You',
       becauseYouWatched: 'Because You Watched',
+      dramaWatchlistTitle: 'Drama Watchlist',
+      dramaWatchlistSubtitle: 'Your saved drama series and short reels.',
+      dramaWatchlistEmpty: 'Your Drama Watchlist is empty. Save any drama series to binge later.',
+      exploreDramasBtn: 'Explore Dramas',
     },
     search: {
       title: 'Cross-Provider Search',
@@ -401,6 +466,15 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       audioTrack: 'Audio Track',
       offlineCached: 'Offline Ready',
       nextEpisodeIn: 'Next Episode in',
+      rewind10s: 'Rewind 10s',
+      forward10s: 'Forward 10s',
+      zoomFill: 'Fill Screen',
+      zoomFit: 'Fit Screen',
+      pinchHint: 'Pinch out for Fullscreen · Pinch in to exit',
+      saveMovie: 'Save Movie',
+      savedMovie: 'In Watchlist',
+      saveDrama: 'Save Drama',
+      savedDrama: 'Saved',
     },
     auth: {
       signInTitle: 'Sign in with Google',
@@ -410,6 +484,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       gateLikeReason: 'Sign in with Google to Like this drama & save favorites.',
       gateCommentReason:
         'Sign in with Google to post comments & quick reactions.',
+      gateWatchlistReason:
+        'Sign in with Google to save movies & access your personal Movie Watchlist.',
       continueBtn: 'Sign in with Google',
       signingIn: 'Connecting Google Account...',
       authErrorPopupBlocked:
@@ -417,7 +493,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       profileTitle: 'My Account',
       signedInAs: 'Verified Google Account',
       likedCount: 'Liked Dramas',
-      savedCount: 'Watchlist',
+      savedCount: 'Movie Watchlist',
+      dramaWatchlistCount: 'Drama Watchlist',
       openHelpCenter: 'Help Center / FAQ',
       signOut: 'Sign Out',
     },
@@ -648,18 +725,41 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
   id: {
     nav: {
       home: 'Beranda',
+      movies: 'Movies',
       explore: 'Jelajahi',
       trending: 'Trending',
       latest: 'Terbaru',
       vip: 'VIP',
       anime: 'Anime',
       dubbed: 'Sulih Suara',
-      watchlist: 'Daftar Saya',
+      watchlist: 'Watchlist',
       dashboard: 'Dasbor',
       search: 'Cari',
       providers: 'Providers',
       login: 'Login',
       account: 'Akun',
+    },
+    moviesPage: {
+      title: 'Film & Bioskop HD',
+      subtitle: 'Tonton film layar lebar, box office, sinema Asia, dan serial lengkap dalam HD jernih.',
+      searchPlaceholder: 'Cari judul film atau serial...',
+      allMovies: 'Pilihan Utama',
+      latestMovies: 'Film Terbaru',
+      categoriesTitle: 'Kategori Film',
+      genreFilter: 'Genre',
+      countryFilter: 'Negara',
+      yearFilter: 'Tahun',
+      allOption: 'Semua',
+      clearFilters: 'Reset',
+      noResults: 'Tidak ada film yang cocok dengan pencarian atau filter ini.',
+      loadMore: 'Muat film lainnya',
+      titlesCount: 'film',
+      watchlistTitle: 'Watchlist Film',
+      watchlistSubtitle: 'Koleksi film favorit Anda yang tersimpan aman di akun Anda.',
+      watchlistLoginTitle: 'Masuk untuk Mengakses Watchlist Film',
+      watchlistLoginDesc: 'Masuk dengan Google untuk menyimpan film favorit dan menyinkronkan Watchlist di semua perangkat.',
+      watchlistEmpty: 'Watchlist Film Anda masih kosong. Simpan film apa saja dari menu Movies.',
+      browseMoviesBtn: 'Jelajahi Movies',
     },
     providers: {
       all: 'Semua Provider',
@@ -710,6 +810,10 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       exploreMoreProviders: 'Muat Provider Lainnya',
       pickedForYou: 'Pilihan Khusus Untukmu',
       becauseYouWatched: 'Karena Kamu Menonton',
+      dramaWatchlistTitle: 'Watchlist Drama',
+      dramaWatchlistSubtitle: 'Daftar serial drama & short reel favorit yang Anda simpan.',
+      dramaWatchlistEmpty: 'Watchlist Drama masih kosong. Simpan serial drama favorit untuk ditonton nanti.',
+      exploreDramasBtn: 'Jelajahi Drama',
     },
     search: {
       title: 'Pencarian Lintas Provider',
@@ -757,6 +861,15 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       audioTrack: 'Trek Audio',
       offlineCached: 'Tersimpan Offline',
       nextEpisodeIn: 'Episode Berikutnya',
+      rewind10s: 'Mundur 10 dtk',
+      forward10s: 'Maju 10 dtk',
+      zoomFill: 'Penuhi Layar',
+      zoomFit: 'Sesuaikan Layar',
+      pinchHint: 'Cubit keluar untuk Layar Penuh · Cubit masuk untuk kembali normal',
+      saveMovie: 'Simpan Film',
+      savedMovie: 'Di Watchlist',
+      saveDrama: 'Simpan Drama',
+      savedDrama: 'Tersimpan',
     },
     auth: {
       signInTitle: 'Masuk dengan Google',
@@ -766,6 +879,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       gateLikeReason: 'Masuk dengan Google untuk menyukai drama ini.',
       gateCommentReason:
         'Masuk dengan Google untuk mengirim komentar & reaksi cepat.',
+      gateWatchlistReason:
+        'Masuk dengan Google untuk menyimpan film ke Watchlist Film Anda.',
       continueBtn: 'Masuk dengan Google',
       signingIn: 'Menghubungkan Akun Google...',
       authErrorPopupBlocked:
@@ -773,7 +888,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       profileTitle: 'Akun Saya',
       signedInAs: 'Akun Google Terverifikasi',
       likedCount: 'Drama Disukai',
-      savedCount: 'Daftar Tontonan',
+      savedCount: 'Watchlist Film',
+      dramaWatchlistCount: 'Watchlist Drama',
       openHelpCenter: 'Pusat Bantuan / FAQ',
       signOut: 'Keluar Akun',
     },
@@ -1004,18 +1120,41 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
   cn: {
     nav: {
       home: '首页',
+      movies: '电影',
       explore: '探索发现',
       trending: '热播榜',
       latest: '最新上线',
       vip: 'VIP 尊享',
       anime: '动漫短剧',
       dubbed: '配音专区',
-      watchlist: '我的追剧',
+      watchlist: '追剧片单',
       dashboard: '用户中心',
       search: '搜索',
       providers: '片源中心',
       login: '登录',
       account: '账户',
+    },
+    moviesPage: {
+      title: '电影影院',
+      subtitle: '高清畅看院线大片、亚洲电影与热门剧集。',
+      searchPlaceholder: '搜索电影或剧集名称...',
+      allMovies: '精选推荐',
+      latestMovies: '最新电影',
+      categoriesTitle: '分类浏览',
+      genreFilter: '类型',
+      countryFilter: '国家/地区',
+      yearFilter: '年份',
+      allOption: '全部',
+      clearFilters: '重置',
+      noResults: '未找到符合条件的电影。',
+      loadMore: '加载更多电影',
+      titlesCount: '部电影',
+      watchlistTitle: '电影片单',
+      watchlistSubtitle: '已登录账户专属同步保存的电影收藏清单。',
+      watchlistLoginTitle: '登录查看电影片单',
+      watchlistLoginDesc: '使用 Google 登录后即可保存喜爱电影并跨设备云端同步。',
+      watchlistEmpty: '电影片单为空，前往电影频道收藏喜欢的影片。',
+      browseMoviesBtn: '浏览电影',
     },
     providers: {
       all: '全部片源',
@@ -1066,6 +1205,10 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       exploreMoreProviders: '加载更多片源',
       pickedForYou: '为你精选推荐',
       becauseYouWatched: '因为你看过',
+      dramaWatchlistTitle: '短剧片单',
+      dramaWatchlistSubtitle: '收藏保存您喜爱的连续短剧。',
+      dramaWatchlistEmpty: '短剧片单为空，点击任意剧集的收藏按钮即可保存。',
+      exploreDramasBtn: '浏览短剧',
     },
     search: {
       title: '全平台跨源搜索',
@@ -1113,6 +1256,15 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       audioTrack: '音轨语言',
       offlineCached: '已离线缓存',
       nextEpisodeIn: '即将播放下一集',
+      rewind10s: '快退 10 秒',
+      forward10s: '快进 10 秒',
+      zoomFill: '铺满屏幕',
+      zoomFit: '适应画面',
+      pinchHint: '双指张开全屏 · 双指捏合退出全屏',
+      saveMovie: '收藏电影',
+      savedMovie: '已加片单',
+      saveDrama: '收藏短剧',
+      savedDrama: '已收藏',
     },
     auth: {
       signInTitle: '使用 Google 登录',
@@ -1120,13 +1272,15 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       gateReasonDefault: '绑定您的真实 Google 账户以点赞剧集、发表短评并累计每日追剧连续打卡。',
       gateLikeReason: '使用 Google 登录后即可点赞并收藏喜爱剧集。',
       gateCommentReason: '使用 Google 登录后即可发表集数短评与表情互动。',
+      gateWatchlistReason: '使用 Google 登录后即可保存电影并查看个人电影片单。',
       continueBtn: '使用 Google 登录',
       signingIn: '正在连接 Google 账户...',
       authErrorPopupBlocked: 'Google 登录弹窗被拦截或已关闭，请点击下方按钮重试。',
       profileTitle: '个人中心',
       signedInAs: '已验证 Google 账户',
       likedCount: '点赞剧集',
-      savedCount: '我的追剧',
+      savedCount: '电影片单',
+      dramaWatchlistCount: '短剧片单',
       openHelpCenter: '帮助中心 / FAQ',
       signOut: '退出登录',
     },
@@ -1355,18 +1509,41 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
   vi: {
     nav: {
       home: 'Trang chủ',
+      movies: 'Phim lẻ',
       explore: 'Khám phá',
       trending: 'Thịnh hành',
       latest: 'Mới nhất',
       vip: 'VIP',
       anime: 'Hoạt hình',
       dubbed: 'Lồng tiếng',
-      watchlist: 'Danh sách',
+      watchlist: 'Danh sách xem',
       dashboard: 'Bảng điều khiển',
       search: 'Tìm kiếm',
       providers: 'Nguồn phim',
       login: 'Đăng nhập',
       account: 'Tài khoản',
+    },
+    moviesPage: {
+      title: 'Phim Chiếu Rạp HD',
+      subtitle: 'Xem phim điện ảnh, bom tấn chiếu rạp, phim châu Á và series trọn bộ sắc nét.',
+      searchPlaceholder: 'Tìm tên phim hoặc series...',
+      allMovies: 'Phim Nổi Bật',
+      latestMovies: 'Phim Mới Nhất',
+      categoriesTitle: 'Danh mục Phim',
+      genreFilter: 'Thể loại',
+      countryFilter: 'Quốc gia',
+      yearFilter: 'Năm',
+      allOption: 'Tất cả',
+      clearFilters: 'Đặt lại',
+      noResults: 'Không tìm thấy phim phù hợp.',
+      loadMore: 'Tải thêm phim',
+      titlesCount: 'phim',
+      watchlistTitle: 'Danh sách Phim',
+      watchlistSubtitle: 'Bộ sưu tập phim đã lưu đồng bộ theo tài khoản của bạn.',
+      watchlistLoginTitle: 'Đăng nhập để xem Danh sách Phim',
+      watchlistLoginDesc: 'Đăng nhập Google để lưu phim yêu thích và đồng bộ trên mọi thiết bị.',
+      watchlistEmpty: 'Danh sách Phim đang trống. Hãy lưu phim từ mục Phim lẻ.',
+      browseMoviesBtn: 'Khám phá Phim',
     },
     providers: {
       all: 'Tất cả nguồn',
@@ -1417,6 +1594,10 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       exploreMoreProviders: 'Tải thêm nguồn phim',
       pickedForYou: 'Đề xuất Dành riêng cho Bạn',
       becauseYouWatched: 'Vì bạn đã xem',
+      dramaWatchlistTitle: 'Danh sách Phim bộ',
+      dramaWatchlistSubtitle: 'Các bộ phim ngắn và series bạn đã lưu.',
+      dramaWatchlistEmpty: 'Danh sách Phim bộ đang trống. Lưu bất kỳ phim bộ nào để xem sau.',
+      exploreDramasBtn: 'Khám phá Phim bộ',
     },
     search: {
       title: 'Tìm kiếm Đa nguồn',
@@ -1464,6 +1645,15 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       audioTrack: 'Âm thanh',
       offlineCached: 'Sẵn sàng Ngoại tuyến',
       nextEpisodeIn: 'Tập tiếp theo sau',
+      rewind10s: 'Tua lùi 10s',
+      forward10s: 'Tua tới 10s',
+      zoomFill: 'Lấp đầy màn hình',
+      zoomFit: 'Vừa màn hình',
+      pinchHint: 'Phóng to để Toàn màn hình · Thu nhỏ để thoát',
+      saveMovie: 'Lưu Phim',
+      savedMovie: 'Đã lưu',
+      saveDrama: 'Lưu Phim bộ',
+      savedDrama: 'Đã lưu',
     },
     auth: {
       signInTitle: 'Đăng nhập với Google',
@@ -1472,6 +1662,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
         'Kết nối tài khoản Google thật của bạn để thích phim, gửi bình luận và lưu chuỗi ngày xem.',
       gateLikeReason: 'Đăng nhập Google để Thích bộ phim này.',
       gateCommentReason: 'Đăng nhập Google để gửi bình luận & cảm xúc.',
+      gateWatchlistReason: 'Đăng nhập Google để lưu phim và xem Danh sách Phim của bạn.',
       continueBtn: 'Đăng nhập với Google',
       signingIn: 'Đang kết nối Google...',
       authErrorPopupBlocked:
@@ -1479,7 +1670,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
       profileTitle: 'Tài khoản của tôi',
       signedInAs: 'Tài khoản Google đã xác minh',
       likedCount: 'Phim đã thích',
-      savedCount: 'Danh sách xem',
+      savedCount: 'Danh sách Phim',
+      dramaWatchlistCount: 'Danh sách Phim bộ',
       openHelpCenter: 'Trung tâm Trợ giúp / FAQ',
       signOut: 'Đăng xuất',
     },

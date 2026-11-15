@@ -11,6 +11,16 @@ interface ProviderHubModalProps {
   onClose: () => void;
 }
 
+interface ProviderBrandSpec {
+  domain: string;
+  secondaryDomain?: string;
+  accentHex: string;
+  bgHex: string;
+  surfaceTint?: 'light' | 'dark';
+  mono: string;
+  textHex?: string;
+}
+
 interface ProviderCardSpec {
   id: ProviderId;
   name: string;
@@ -20,33 +30,576 @@ interface ProviderCardSpec {
   logo: React.ReactNode;
 }
 
-function makeMonoLogo(
-  mono: string,
-  accentHex: string,
-  textHex = '#FFFFFF',
-  borderClass = 'border-white/20'
-): React.ReactNode {
+const PROVIDER_BRAND_META: Record<Exclude<ProviderId, 'All'>, ProviderBrandSpec> = {
+  DramaBox: {
+    domain: 'dramaboxdb.com',
+    secondaryDomain: 'dramaboxapp.com',
+    accentHex: '#EF4444',
+    bgHex: '#121216',
+    surfaceTint: 'light',
+    mono: 'DB',
+  },
+  NetShort: {
+    domain: 'netshort.com',
+    accentHex: '#E50914',
+    bgHex: '#140B0D',
+    surfaceTint: 'light',
+    mono: 'NS',
+  },
+  AnyReel: {
+    domain: 'anyreel.tv',
+    accentHex: '#10B981',
+    bgHex: '#071B14',
+    surfaceTint: 'dark',
+    mono: 'AR',
+    textHex: '#ECFDF5',
+  },
+  Melolo: {
+    domain: 'melolo.com',
+    accentHex: '#F59E0B',
+    bgHex: '#1E1505',
+    surfaceTint: 'light',
+    mono: 'ML',
+    textHex: '#09090B',
+  },
+  WeTV: {
+    domain: 'wetv.vip',
+    accentHex: '#FF6A00',
+    bgHex: '#FF6A00',
+    surfaceTint: 'light',
+    mono: 'WT',
+  },
+  ReelShort: {
+    domain: 'reelshort.com',
+    accentHex: '#E11D48',
+    bgHex: '#1F0810',
+    surfaceTint: 'light',
+    mono: 'RS',
+  },
+  ReelShortV2: {
+    domain: 'reelshort.com',
+    accentHex: '#BE123C',
+    bgHex: '#1A070D',
+    surfaceTint: 'light',
+    mono: 'R2',
+  },
+  ShortMax: {
+    domain: 'shortmax.app',
+    secondaryDomain: 'shorttv.live',
+    accentHex: '#EF4444',
+    bgHex: '#190A0A',
+    surfaceTint: 'light',
+    mono: 'SM',
+  },
+  ShortMaxV2: {
+    domain: 'shortmax.app',
+    secondaryDomain: 'shorttv.live',
+    accentHex: '#DC2626',
+    bgHex: '#160909',
+    surfaceTint: 'light',
+    mono: 'S2',
+  },
+  GoodShort: {
+    domain: 'goodshort.com',
+    accentHex: '#F59E0B',
+    bgHex: '#1A1306',
+    surfaceTint: 'light',
+    mono: 'GS',
+    textHex: '#09090B',
+  },
+  FreeReels: {
+    domain: 'freereels.io',
+    secondaryDomain: 'freereels.app',
+    accentHex: '#10B981',
+    bgHex: '#071913',
+    surfaceTint: 'light',
+    mono: 'FR',
+    textHex: '#09090B',
+  },
+  DramaWave: {
+    domain: 'mydramawave.com',
+    secondaryDomain: 'dramawave.com',
+    accentHex: '#14B8A6',
+    bgHex: '#061918',
+    surfaceTint: 'light',
+    mono: 'DW',
+    textHex: '#09090B',
+  },
+  FlickReels: {
+    domain: 'flickreels.net',
+    secondaryDomain: 'flickreels.com',
+    accentHex: '#F43F5E',
+    bgHex: '#1C0910',
+    surfaceTint: 'light',
+    mono: 'FL',
+  },
+  Vigloo: {
+    domain: 'vigloo.com',
+    accentHex: '#7C3AED',
+    bgHex: '#130B24',
+    surfaceTint: 'dark',
+    mono: 'VG',
+  },
+  FlexTV: {
+    domain: 'flextv.cc',
+    accentHex: '#2563EB',
+    bgHex: '#091229',
+    surfaceTint: 'light',
+    mono: 'FX',
+  },
+  DramaDash: {
+    domain: 'dramadash.app',
+    accentHex: '#F87171',
+    bgHex: '#1B0C0C',
+    surfaceTint: 'dark',
+    mono: 'DD',
+    textHex: '#09090B',
+  },
+  FlareFlow: {
+    domain: 'flareflow.tv',
+    accentHex: '#FB923C',
+    bgHex: '#1E1107',
+    surfaceTint: 'dark',
+    mono: 'FF',
+    textHex: '#09090B',
+  },
+  StoryReel: {
+    domain: 'storyreel.tv',
+    accentHex: '#6366F1',
+    bgHex: '#0E1024',
+    surfaceTint: 'dark',
+    mono: 'SR',
+  },
+  StoryReelV2: {
+    domain: 'storyreel.tv',
+    accentHex: '#4F46E5',
+    bgHex: '#0C0D20',
+    surfaceTint: 'dark',
+    mono: 'S2',
+  },
+  VibeShort: {
+    domain: 'vibeshort.com',
+    accentHex: '#D946EF',
+    bgHex: '#1D0921',
+    surfaceTint: 'dark',
+    mono: 'VS',
+  },
+  VibeShortV2: {
+    domain: 'vibeshort.com',
+    accentHex: '#C026D3',
+    bgHex: '#18071B',
+    surfaceTint: 'dark',
+    mono: 'V2',
+  },
+  CubeTV: {
+    domain: 'cubetv.sg',
+    accentHex: '#06B6D4',
+    bgHex: '#07191E',
+    surfaceTint: 'dark',
+    mono: 'CT',
+    textHex: '#09090B',
+  },
+  MicroDrama: {
+    domain: 'microdrama.tv',
+    accentHex: '#38BDF8',
+    bgHex: '#071722',
+    surfaceTint: 'dark',
+    mono: 'MD',
+    textHex: '#09090B',
+  },
+  FunDrama: {
+    domain: 'fundrama.tv',
+    accentHex: '#FACC15',
+    bgHex: '#1C1906',
+    surfaceTint: 'dark',
+    mono: 'FD',
+    textHex: '#09090B',
+  },
+  FreeShort: {
+    domain: 'freeshort.tv',
+    accentHex: '#22C55E',
+    bgHex: '#071B0E',
+    surfaceTint: 'dark',
+    mono: 'FS',
+    textHex: '#09090B',
+  },
+  ToonShort: {
+    domain: 'toonshort.com',
+    accentHex: '#A855F7',
+    bgHex: '#160A24',
+    surfaceTint: 'dark',
+    mono: 'TS',
+  },
+  HappyShort: {
+    domain: 'happyshort.tv',
+    accentHex: '#EAB308',
+    bgHex: '#1A1606',
+    surfaceTint: 'dark',
+    mono: 'HS',
+    textHex: '#09090B',
+  },
+  PineDrama: {
+    domain: 'pinedrama.com',
+    accentHex: '#16A34A',
+    bgHex: '#07190E',
+    surfaceTint: 'dark',
+    mono: 'PN',
+  },
+  DotDrama: {
+    domain: 'dotdrama.tv',
+    accentHex: '#EC4899',
+    bgHex: '#1D0914',
+    surfaceTint: 'dark',
+    mono: 'DT',
+  },
+  iDrama: {
+    domain: 'idrama.tv',
+    accentHex: '#0284C7',
+    bgHex: '#061522',
+    surfaceTint: 'dark',
+    mono: 'ID',
+  },
+  iDramaV2: {
+    domain: 'idrama.tv',
+    accentHex: '#0369A1',
+    bgHex: '#05121D',
+    surfaceTint: 'dark',
+    mono: 'I2',
+  },
+  DramaOra: {
+    domain: 'dramaora.com',
+    accentHex: '#EC4899',
+    bgHex: '#1C0915',
+    surfaceTint: 'dark',
+    mono: 'DO',
+  },
+  MeloShort: {
+    domain: 'meloshort.com',
+    accentHex: '#8B5CF6',
+    bgHex: '#130D24',
+    surfaceTint: 'dark',
+    mono: 'MS',
+  },
+  PetaDrama: {
+    domain: 'petadrama.com',
+    accentHex: '#06B6D4',
+    bgHex: '#06181D',
+    surfaceTint: 'dark',
+    mono: 'PD',
+    textHex: '#09090B',
+  },
+  RadReels: {
+    domain: 'radreels.com',
+    accentHex: '#F97316',
+    bgHex: '#1F1006',
+    surfaceTint: 'dark',
+    mono: 'RR',
+    textHex: '#09090B',
+  },
+  DramaVerse: {
+    domain: 'dramaverse.tv',
+    accentHex: '#6366F1',
+    bgHex: '#0C0F24',
+    surfaceTint: 'dark',
+    mono: 'DV',
+  },
+  KalosTV: {
+    domain: 'kalostv.com',
+    accentHex: '#14B8A6',
+    bgHex: '#061A18',
+    surfaceTint: 'light',
+    mono: 'KT',
+    textHex: '#09090B',
+  },
+  StardustTV: {
+    domain: 'stardusttv.net',
+    accentHex: '#EAB308',
+    bgHex: '#1B1606',
+    surfaceTint: 'light',
+    mono: 'SD',
+    textHex: '#09090B',
+  },
+  StarShort: {
+    domain: 'starshort.tv',
+    accentHex: '#3B82F6',
+    bgHex: '#081326',
+    surfaceTint: 'light',
+    mono: 'SS',
+  },
+  DramaBite: {
+    domain: 'dramabite.tv',
+    accentHex: '#FB7185',
+    bgHex: '#1D0A10',
+    surfaceTint: 'dark',
+    mono: 'DB',
+    textHex: '#09090B',
+  },
+  LoveShots: {
+    domain: 'loveshots.app',
+    accentHex: '#F43F5E',
+    bgHex: '#1F080E',
+    surfaceTint: 'light',
+    mono: 'LS',
+  },
+  MyDrama: {
+    domain: 'mydrama.app',
+    accentHex: '#A855F7',
+    bgHex: '#160B24',
+    surfaceTint: 'light',
+    mono: 'MY',
+  },
+  ShotShort: {
+    domain: 'shotshort.com',
+    accentHex: '#84CC16',
+    bgHex: '#121B07',
+    surfaceTint: 'dark',
+    mono: 'SH',
+    textHex: '#09090B',
+  },
+  MoboReels: {
+    domain: 'moboreels.com',
+    accentHex: '#0EA5E9',
+    bgHex: '#071723',
+    surfaceTint: 'light',
+    mono: 'MR',
+  },
+  BlinkDrama: {
+    domain: 'blinkdrama.com',
+    accentHex: '#D946EF',
+    bgHex: '#1B0920',
+    surfaceTint: 'dark',
+    mono: 'BD',
+  },
+  JoyReels: {
+    domain: 'joyreels.com',
+    accentHex: '#F43F5E',
+    bgHex: '#1F0810',
+    surfaceTint: 'light',
+    mono: 'JR',
+  },
+  SodaReels: {
+    domain: 'sodareels.com',
+    accentHex: '#06B6D4',
+    bgHex: '#071A1F',
+    surfaceTint: 'light',
+    mono: 'SO',
+    textHex: '#09090B',
+  },
+  BonusTV: {
+    domain: 'bonustv.app',
+    accentHex: '#F59E0B',
+    bgHex: '#1C1406',
+    surfaceTint: 'dark',
+    mono: 'BT',
+    textHex: '#09090B',
+  },
+  iQIYI: {
+    domain: 'iq.com',
+    secondaryDomain: 'iqiyi.com',
+    accentHex: '#00BE06',
+    bgHex: '#041A06',
+    surfaceTint: 'light',
+    mono: 'IQ',
+    textHex: '#FFFFFF',
+  },
+};
+
+function BrandFallbackEmblem({
+  providerId,
+  spec,
+}: {
+  providerId: Exclude<ProviderId, 'All'>;
+  spec: ProviderBrandSpec;
+}) {
+  // Bespoke official-style brand marks for flagship platforms
+  if (providerId === 'WeTV') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#FF8C00] to-[#FF5500] flex items-center justify-center shadow-lg border border-white/20 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M7.5 5.4C6.4 4.8 5 5.6 5 6.9V17.1C5 18.4 6.4 19.2 7.5 18.6L18.2 13.5C19.5 12.9 19.5 11.1 18.2 10.5L7.5 5.4Z"
+            fill="#FFFFFF"
+          />
+          <circle cx="9.5" cy="12" r="2.1" fill="#FF6A00" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'iQIYI') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-[#00BE06] flex items-center justify-center shadow-lg border border-white/20 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="4" y="6" width="2.8" height="12" rx="1.4" fill="#FFFFFF" />
+          <circle cx="14.5" cy="12" r="5" stroke="#FFFFFF" strokeWidth="2.5" />
+          <path d="M13 9.7L17.2 12L13 14.3V9.7Z" fill="#FFFFFF" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'DramaBox') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-white flex items-center justify-center shadow-lg border border-white/25 shrink-0">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="20" height="20" rx="6" fill="#111115" />
+          <path d="M8.5 7.2L17.2 12L8.5 16.8V7.2Z" fill="#EF4444" />
+          <path d="M8.5 7.2L13.2 10L8.5 12.5V7.2Z" fill="#FCA5A5" opacity="0.55" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'ReelShort' || providerId === 'ReelShortV2') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#F43F5E] to-[#BE123C] flex items-center justify-center shadow-lg border border-white/20 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="4" y="5" width="16" height="14" rx="4" stroke="#FFFFFF" strokeWidth="2" />
+          <path d="M10.2 9L15.4 12L10.2 15V9Z" fill="#FFFFFF" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'NetShort') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#EF4444] to-[#B91C1C] flex items-center justify-center shadow-lg border border-white/20 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6.5 17V7L11.5 17V7" stroke="#FFFFFF" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M14.5 9L19 12L14.5 15V9Z" fill="#FFFFFF" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'ShortMax' || providerId === 'ShortMaxV2') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#DC2626] to-[#7F1D1D] flex items-center justify-center shadow-lg border border-white/20 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M16.5 8.5C15.5 7.2 13.7 6.8 11.8 7.2C9.7 7.6 8.6 9.1 9.2 10.6C9.8 12.1 14.8 11.8 15.6 13.8C16.3 15.6 14.6 17.2 12 17.2C10.1 17.2 8.4 16.4 7.5 15.2" stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'GoodShort') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#FBBF24] to-[#D97706] flex items-center justify-center shadow-lg border border-white/25 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" fill="#18181B" />
+          <path d="M10 8.5L16 12L10 15.5V8.5Z" fill="#FBBF24" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (providerId === 'Melolo') {
+    return (
+      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#F59E0B] to-[#EA580C] flex items-center justify-center shadow-lg border border-white/20 shrink-0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="7.5" stroke="#FFFFFF" strokeWidth="2.2" />
+          <path d="M9 13.5C9.8 15 11 15.6 12 15.6C13 15.6 14.2 15 15 13.5" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="9.6" cy="10.2" r="1.1" fill="#FFFFFF" />
+          <circle cx="14.4" cy="10.2" r="1.1" fill="#FFFFFF" />
+        </svg>
+      </div>
+    );
+  }
+
   return (
     <div
-      className={`w-11 h-11 rounded-xl bg-[#09090B] border ${borderClass} flex items-center justify-center shadow-lg shrink-0`}
+      className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg border border-white/20 shrink-0 relative overflow-hidden"
+      style={{
+        background: `linear-gradient(135deg, ${spec.accentHex}, ${spec.bgHex})`,
+      }}
     >
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect width="24" height="24" rx="6" fill={accentHex} />
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <rect
+          x="1.5"
+          y="1.5"
+          width="23"
+          height="23"
+          rx="6"
+          fill={spec.bgHex}
+          fillOpacity="0.65"
+          stroke="#FFFFFF"
+          strokeOpacity="0.22"
+        />
         <text
-          x="12"
-          y="15.5"
+          x="13"
+          y="16.5"
           textAnchor="middle"
-          fill={textHex}
+          fill={spec.textHex ?? '#FFFFFF'}
           fontSize="10"
           fontWeight="800"
+          letterSpacing="-0.4"
           fontFamily="system-ui, -apple-system, sans-serif"
         >
-          {mono}
+          {spec.mono}
         </text>
       </svg>
     </div>
   );
 }
+
+const ProviderBrandLogo: React.FC<{
+  providerId: Exclude<ProviderId, 'All'>;
+  name: string;
+}> = ({ providerId, name }) => {
+  const spec = PROVIDER_BRAND_META[providerId];
+  const [sourceStage, setSourceStage] = useState<0 | 1 | 2>(0);
+  const [imgReady, setImgReady] = useState(false);
+
+  const primaryUrl = `https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${spec.domain}&size=128`;
+  const secondaryDomain = spec.secondaryDomain || spec.domain;
+  const secondaryUrl = `https://www.google.com/s2/favicons?domain=${secondaryDomain}&sz=128`;
+
+  const currentSrc =
+    sourceStage === 0 ? primaryUrl : sourceStage === 1 ? secondaryUrl : '';
+
+  if (sourceStage >= 2 || !currentSrc) {
+    return <BrandFallbackEmblem providerId={providerId} spec={spec} />;
+  }
+
+  const tileClasses =
+    spec.surfaceTint === 'light'
+      ? 'bg-white border-white/25'
+      : 'bg-[#121218] border-white/20';
+
+  return (
+    <div className="relative w-11 h-11 shrink-0">
+      {!imgReady && <BrandFallbackEmblem providerId={providerId} spec={spec} />}
+      <div
+        className={`w-11 h-11 rounded-xl border p-1.5 flex items-center justify-center shadow-lg overflow-hidden transition-opacity duration-150 ${tileClasses} ${
+          imgReady ? 'opacity-100 relative' : 'opacity-0 absolute inset-0 pointer-events-none'
+        }`}
+      >
+        <img
+          src={currentSrc}
+          alt={`${name} logo`}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-contain rounded-md"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            // Reject tiny default 16px globe placeholder favicons
+            if (img.naturalWidth < 28 || img.naturalHeight < 28) {
+              setImgReady(false);
+              setSourceStage((prev) => (prev === 0 ? 1 : 2));
+              return;
+            }
+            setImgReady(true);
+          }}
+          onError={() => {
+            setImgReady(false);
+            setSourceStage((prev) => (prev === 0 ? 1 : 2));
+          }}
+        />
+      </div>
+    </div>
+  );
+};
 
 export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
   open,
@@ -95,14 +648,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Billionaire Romance, Revenge & VIP Exclusives',
         available: true,
         count: counts.DramaBox ?? 0,
-        logo: (
-          <div className="w-11 h-11 rounded-xl bg-white flex items-center justify-center shadow-lg shrink-0">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect width="24" height="24" rx="6" fill="#09090B" />
-              <path d="M8.5 7.2L17.2 12L8.5 16.8V7.2Z" fill="#EF4444" />
-            </svg>
-          </div>
-        ),
+        logo: <ProviderBrandLogo providerId="DramaBox" name="DramaBox" />,
       },
       {
         id: 'NetShort',
@@ -110,7 +656,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending Vertical Shorts & Donghua Hits',
         available: true,
         count: counts.NetShort ?? 0,
-        logo: makeMonoLogo('NS', '#EF4444', '#FFFFFF', 'border-red-500/35'),
+        logo: <ProviderBrandLogo providerId="NetShort" name="NetShort" />,
       },
       {
         id: 'AnyReel',
@@ -118,7 +664,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Asian Short Dramas, Werewolf & Contract Romance',
         available: true,
         count: counts.AnyReel ?? 0,
-        logo: makeMonoLogo('AR', '#10B981', '#09090B', 'border-emerald-400/35'),
+        logo: <ProviderBrandLogo providerId="AnyReel" name="AnyReel" />,
       },
       {
         id: 'Melolo',
@@ -126,7 +672,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'System Awakening, Anime Shorts & Encrypted HD Streams',
         available: true,
         count: counts.Melolo ?? 0,
-        logo: makeMonoLogo('ML', '#F59E0B', '#09090B', 'border-amber-400/35'),
+        logo: <ProviderBrandLogo providerId="Melolo" name="Melolo" />,
       },
       {
         id: 'WeTV',
@@ -134,7 +680,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Premium Asian Series & Youth Campus Dramas',
         available: true,
         count: counts.WeTV ?? 0,
-        logo: makeMonoLogo('WT', '#F97316', '#FFFFFF', 'border-orange-400/35'),
+        logo: <ProviderBrandLogo providerId="WeTV" name="WeTV" />,
       },
       {
         id: 'ReelShort',
@@ -142,7 +688,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Global Billionaire, Werewolf & Romance Hits',
         available: true,
         count: counts.ReelShort ?? 0,
-        logo: makeMonoLogo('RS', '#E11D48', '#FFFFFF', 'border-rose-500/35'),
+        logo: <ProviderBrandLogo providerId="ReelShort" name="ReelShort" />,
       },
       {
         id: 'ReelShortV2',
@@ -150,7 +696,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Extended ReelShort Multi-Region Catalog',
         available: true,
         count: counts.ReelShortV2 ?? 0,
-        logo: makeMonoLogo('R2', '#BE123C', '#FFFFFF', 'border-rose-600/35'),
+        logo: <ProviderBrandLogo providerId="ReelShortV2" name="ReelShort V2" />,
       },
       {
         id: 'ShortMax',
@@ -158,7 +704,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Dual AES/Plain HD Vertical Blockbusters',
         available: true,
         count: counts.ShortMax ?? 0,
-        logo: makeMonoLogo('SM', '#EF4444', '#FFFFFF', 'border-red-500/35'),
+        logo: <ProviderBrandLogo providerId="ShortMax" name="ShortMax" />,
       },
       {
         id: 'ShortMaxV2',
@@ -166,7 +712,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'ShortMax V2 Mirror & International Feed',
         available: true,
         count: counts.ShortMaxV2 ?? 0,
-        logo: makeMonoLogo('M2', '#DC2626', '#FFFFFF', 'border-red-600/35'),
+        logo: <ProviderBrandLogo providerId="ShortMaxV2" name="ShortMax V2" />,
       },
       {
         id: 'GoodShort',
@@ -174,7 +720,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending, Terbaru, Anime & Indonesian Dubbing',
         available: true,
         count: counts.GoodShort ?? 0,
-        logo: makeMonoLogo('GS', '#D97706', '#FFFFFF', 'border-amber-500/35'),
+        logo: <ProviderBrandLogo providerId="GoodShort" name="GoodShort" />,
       },
       {
         id: 'FreeReels',
@@ -182,7 +728,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Cursor-Paginated Popular, Anime & Dubbed Reels',
         available: true,
         count: counts.FreeReels ?? 0,
-        logo: makeMonoLogo('FE', '#34D399', '#09090B', 'border-emerald-400/35'),
+        logo: <ProviderBrandLogo providerId="FreeReels" name="FreeReels" />,
       },
       {
         id: 'DramaWave',
@@ -190,7 +736,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Exclusive & VIP Dubbed Fantasy Dramas',
         available: true,
         count: counts.DramaWave ?? 0,
-        logo: makeMonoLogo('DW', '#2DD4BF', '#09090B', 'border-teal-400/35'),
+        logo: <ProviderBrandLogo providerId="DramaWave" name="DramaWave" />,
       },
       {
         id: 'FlickReels',
@@ -198,7 +744,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'All-Drama Catalog & Rebirth Family Shorts',
         available: true,
         count: counts.FlickReels ?? 0,
-        logo: makeMonoLogo('FR', '#F43F5E', '#FFFFFF', 'border-rose-400/35'),
+        logo: <ProviderBrandLogo providerId="FlickReels" name="FlickReels" />,
       },
       {
         id: 'Vigloo',
@@ -206,7 +752,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'K-Short Originals, Ranking & Filterable Browse',
         available: true,
         count: counts.Vigloo ?? 0,
-        logo: makeMonoLogo('VG', '#7C3AED', '#FFFFFF', 'border-violet-500/35'),
+        logo: <ProviderBrandLogo providerId="Vigloo" name="Vigloo" />,
       },
       {
         id: 'FlexTV',
@@ -214,7 +760,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Urban Secret Identity & Melodrama Mini-Series',
         available: true,
         count: counts.FlexTV ?? 0,
-        logo: makeMonoLogo('FX', '#2563EB', '#FFFFFF', 'border-blue-500/35'),
+        logo: <ProviderBrandLogo providerId="FlexTV" name="FlexTV" />,
       },
       {
         id: 'DramaDash',
@@ -222,7 +768,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Fast-Paced Trending Romance & Thriller Shorts',
         available: true,
         count: counts.DramaDash ?? 0,
-        logo: makeMonoLogo('DD', '#F87171', '#09090B', 'border-red-400/35'),
+        logo: <ProviderBrandLogo providerId="DramaDash" name="DramaDash" />,
       },
       {
         id: 'FlareFlow',
@@ -230,7 +776,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: '1080p Dubbed & Original Vertical Dramas',
         available: true,
         count: counts.FlareFlow ?? 0,
-        logo: makeMonoLogo('FF', '#FB923C', '#09090B', 'border-orange-400/35'),
+        logo: <ProviderBrandLogo providerId="FlareFlow" name="FlareFlow" />,
       },
       {
         id: 'StoryReel',
@@ -238,7 +784,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Encrypted & Plain 1080p HLS Mini-Dramas',
         available: true,
         count: counts.StoryReel ?? 0,
-        logo: makeMonoLogo('SR', '#818CF8', '#09090B', 'border-indigo-400/35'),
+        logo: <ProviderBrandLogo providerId="StoryReel" name="StoryReel" />,
       },
       {
         id: 'StoryReelV2',
@@ -246,7 +792,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'StoryReel V2 Multilingual Global Catalog',
         available: true,
         count: counts.StoryReelV2 ?? 0,
-        logo: makeMonoLogo('S2', '#6366F1', '#FFFFFF', 'border-indigo-500/35'),
+        logo: <ProviderBrandLogo providerId="StoryReelV2" name="StoryReel V2" />,
       },
       {
         id: 'VibeShort',
@@ -254,7 +800,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Dubbed Mafia, CEO & Plain-Stream Verticals',
         available: true,
         count: counts.VibeShort ?? 0,
-        logo: makeMonoLogo('VS', '#E879F9', '#09090B', 'border-fuchsia-400/35'),
+        logo: <ProviderBrandLogo providerId="VibeShort" name="VibeShort" />,
       },
       {
         id: 'VibeShortV2',
@@ -262,7 +808,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'VibeShort V2 Fresh Drops & Multi-Audio Feed',
         available: true,
         count: counts.VibeShortV2 ?? 0,
-        logo: makeMonoLogo('V2', '#C026D3', '#FFFFFF', 'border-fuchsia-500/35'),
+        logo: <ProviderBrandLogo providerId="VibeShortV2" name="VibeShort V2" />,
       },
       {
         id: 'CubeTV',
@@ -270,7 +816,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot Wuxia, Martial Arts & New Release Shorts',
         available: true,
         count: counts.CubeTV ?? 0,
-        logo: makeMonoLogo('CT', '#22D3EE', '#09090B', 'border-cyan-400/35'),
+        logo: <ProviderBrandLogo providerId="CubeTV" name="CubeTV" />,
       },
       {
         id: 'MicroDrama',
@@ -278,7 +824,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Bite-Sized Micro Episodes & Revenge Arcs',
         available: true,
         count: counts.MicroDrama ?? 0,
-        logo: makeMonoLogo('MD', '#38BDF8', '#09090B', 'border-sky-400/35'),
+        logo: <ProviderBrandLogo providerId="MicroDrama" name="MicroDrama" />,
       },
       {
         id: 'FunDrama',
@@ -286,7 +832,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Lighthearted Rom-Com & Trending Short Stories',
         available: true,
         count: counts.FunDrama ?? 0,
-        logo: makeMonoLogo('FD', '#FACC15', '#09090B', 'border-yellow-400/35'),
+        logo: <ProviderBrandLogo providerId="FunDrama" name="FunDrama" />,
       },
       {
         id: 'FreeShort',
@@ -294,7 +840,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot, Ranking & Dubbed Vertical Drama Library',
         available: true,
         count: counts.FreeShort ?? 0,
-        logo: makeMonoLogo('FS', '#4ADE80', '#09090B', 'border-green-400/35'),
+        logo: <ProviderBrandLogo providerId="FreeShort" name="FreeShort" />,
       },
       {
         id: 'ToonShort',
@@ -302,7 +848,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Popular Motion-Comic & Contract Love Shorts',
         available: true,
         count: counts.ToonShort ?? 0,
-        logo: makeMonoLogo('TS', '#C084FC', '#09090B', 'border-purple-400/35'),
+        logo: <ProviderBrandLogo providerId="ToonShort" name="ToonShort" />,
       },
       {
         id: 'HappyShort',
@@ -310,7 +856,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending, Popular, Terbaru & Daily Rankings',
         available: true,
         count: counts.HappyShort ?? 0,
-        logo: makeMonoLogo('HS', '#FDE047', '#09090B', 'border-yellow-300/35'),
+        logo: <ProviderBrandLogo providerId="HappyShort" name="HappyShort" />,
       },
       {
         id: 'PineDrama',
@@ -318,7 +864,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Vertical Legal, Suspense & Romance Mini-Series',
         available: true,
         count: counts.PineDrama ?? 0,
-        logo: makeMonoLogo('PN', '#16A34A', '#FFFFFF', 'border-green-500/35'),
+        logo: <ProviderBrandLogo providerId="PineDrama" name="PineDrama" />,
       },
       {
         id: 'DotDrama',
@@ -326,7 +872,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Fantasy Mystery & Supernatural Short Series',
         available: true,
         count: counts.DotDrama ?? 0,
-        logo: makeMonoLogo('DT', '#EC4899', '#FFFFFF', 'border-pink-500/35'),
+        logo: <ProviderBrandLogo providerId="DotDrama" name="DotDrama" />,
       },
       {
         id: 'iDrama',
@@ -334,7 +880,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'H.264 High-Compatibility CEO & Romance Catalog',
         available: true,
         count: counts.iDrama ?? 0,
-        logo: makeMonoLogo('ID', '#0284C7', '#FFFFFF', 'border-sky-500/35'),
+        logo: <ProviderBrandLogo providerId="iDrama" name="iDrama" />,
       },
       {
         id: 'iDramaV2',
@@ -342,7 +888,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'iDrama V2 Extended Cursor Catalog',
         available: true,
         count: counts.iDramaV2 ?? 0,
-        logo: makeMonoLogo('I2', '#0369A1', '#FFFFFF', 'border-sky-600/35'),
+        logo: <ProviderBrandLogo providerId="iDramaV2" name="iDrama V2" />,
       },
       {
         id: 'DramaOra',
@@ -350,7 +896,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Curated Category Hits, Romance & Revenge Shorts',
         available: true,
         count: counts.DramaOra ?? 0,
-        logo: makeMonoLogo('DO', '#EC4899', '#FFFFFF', 'border-pink-400/35'),
+        logo: <ProviderBrandLogo providerId="DramaOra" name="DramaOra" />,
       },
       {
         id: 'MeloShort',
@@ -358,7 +904,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Top Rankings, Fresh Picks & Multi-Genre Reels',
         available: true,
         count: counts.MeloShort ?? 0,
-        logo: makeMonoLogo('MS', '#8B5CF6', '#FFFFFF', 'border-violet-400/35'),
+        logo: <ProviderBrandLogo providerId="MeloShort" name="MeloShort" />,
       },
       {
         id: 'PetaDrama',
@@ -366,7 +912,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Full Catalog Vertical Series & Category Specials',
         available: true,
         count: counts.PetaDrama ?? 0,
-        logo: makeMonoLogo('PD', '#06B6D4', '#09090B', 'border-cyan-400/35'),
+        logo: <ProviderBrandLogo providerId="PetaDrama" name="PetaDrama" />,
       },
       {
         id: 'RadReels',
@@ -374,7 +920,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Latest Releases & High-Speed Trending Reels',
         available: true,
         count: counts.RadReels ?? 0,
-        logo: makeMonoLogo('RR', '#F97316', '#09090B', 'border-orange-400/35'),
+        logo: <ProviderBrandLogo providerId="RadReels" name="RadReels" />,
       },
       {
         id: 'DramaVerse',
@@ -382,7 +928,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot Releases, Modern CEO & Mystery Shorts',
         available: true,
         count: counts.DramaVerse ?? 0,
-        logo: makeMonoLogo('DV', '#6366F1', '#FFFFFF', 'border-indigo-400/35'),
+        logo: <ProviderBrandLogo providerId="DramaVerse" name="DramaVerse" />,
       },
       {
         id: 'KalosTV',
@@ -390,7 +936,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Curated Vertical Mini-Series & Global Subs',
         available: true,
         count: counts.KalosTV ?? 0,
-        logo: makeMonoLogo('KT', '#14B8A6', '#09090B', 'border-teal-400/35'),
+        logo: <ProviderBrandLogo providerId="KalosTV" name="KalosTV" />,
       },
       {
         id: 'StardustTV',
@@ -398,7 +944,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot Charts, Terbaru Drops & Exclusive Mini-Dramas',
         available: true,
         count: counts.StardustTV ?? 0,
-        logo: makeMonoLogo('SD', '#EAB308', '#09090B', 'border-yellow-400/35'),
+        logo: <ProviderBrandLogo providerId="StardustTV" name="StardustTV" />,
       },
       {
         id: 'StarShort',
@@ -406,7 +952,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending VIP Shorts, Billionaire & Urban Romance',
         available: true,
         count: counts.StarShort ?? 0,
-        logo: makeMonoLogo('SS', '#3B82F6', '#FFFFFF', 'border-blue-400/35'),
+        logo: <ProviderBrandLogo providerId="StarShort" name="StarShort" />,
       },
       {
         id: 'DramaBite',
@@ -414,7 +960,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Bite-Sized Cliffhangers & Fast-Paced Thrillers',
         available: true,
         count: counts.DramaBite ?? 0,
-        logo: makeMonoLogo('DB', '#FB7185', '#09090B', 'border-rose-400/35'),
+        logo: <ProviderBrandLogo providerId="DramaBite" name="DramaBite" />,
       },
       {
         id: 'LoveShots',
@@ -422,7 +968,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Top Rankings, Sweet Romance & Melodrama Hits',
         available: true,
         count: counts.LoveShots ?? 0,
-        logo: makeMonoLogo('LS', '#F43F5E', '#FFFFFF', 'border-rose-500/35'),
+        logo: <ProviderBrandLogo providerId="LoveShots" name="LoveShots" />,
       },
       {
         id: 'MyDrama',
@@ -430,7 +976,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Daily Picks & Bite-Sized Asian Mini-Series',
         available: true,
         count: counts.MyDrama ?? 0,
-        logo: makeMonoLogo('MY', '#A855F7', '#FFFFFF', 'border-purple-400/35'),
+        logo: <ProviderBrandLogo providerId="MyDrama" name="MyDrama" />,
       },
       {
         id: 'ShotShort',
@@ -438,7 +984,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Newest Drops & Sorted All-Drama Catalog',
         available: true,
         count: counts.ShotShort ?? 0,
-        logo: makeMonoLogo('SH', '#84CC16', '#09090B', 'border-lime-400/35'),
+        logo: <ProviderBrandLogo providerId="ShotShort" name="ShotShort" />,
       },
       {
         id: 'MoboReels',
@@ -446,7 +992,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Original Hits, Asia, Animasi & Dedicated VTT Subtitles',
         available: true,
         count: counts.MoboReels ?? 0,
-        logo: makeMonoLogo('MR', '#0EA5E9', '#FFFFFF', 'border-sky-400/35'),
+        logo: <ProviderBrandLogo providerId="MoboReels" name="MoboReels" />,
       },
       {
         id: 'BlinkDrama',
@@ -454,7 +1000,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Dual AES/Plain HD Streams & Fresh Drama Drops',
         available: true,
         count: counts.BlinkDrama ?? 0,
-        logo: makeMonoLogo('BD', '#D946EF', '#FFFFFF', 'border-fuchsia-400/35'),
+        logo: <ProviderBrandLogo providerId="BlinkDrama" name="BlinkDrama" />,
       },
       {
         id: 'JoyReels',
@@ -462,7 +1008,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Weekly Top Charts, Hot Reels, Films & Asian Series',
         available: true,
         count: counts.JoyReels ?? 0,
-        logo: makeMonoLogo('JR', '#F43F5E', '#FFFFFF', 'border-rose-400/35'),
+        logo: <ProviderBrandLogo providerId="JoyReels" name="JoyReels" />,
       },
       {
         id: 'SodaReels',
@@ -470,7 +1016,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Multi-Quality Modern Romance & Urban Short Dramas',
         available: true,
         count: counts.SodaReels ?? 0,
-        logo: makeMonoLogo('SR', '#06B6D4', '#09090B', 'border-cyan-400/35'),
+        logo: <ProviderBrandLogo providerId="SodaReels" name="SodaReels" />,
       },
       {
         id: 'BonusTV',
@@ -478,7 +1024,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'CEO Romance, Family Revenge & Vertical Mini-Dramas',
         available: true,
         count: counts.BonusTV ?? 0,
-        logo: makeMonoLogo('BT', '#F59E0B', '#09090B', 'border-amber-400/35'),
+        logo: <ProviderBrandLogo providerId="BonusTV" name="BonusTV" />,
       },
       {
         id: 'iQIYI',
@@ -486,7 +1032,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Premium C-Drama, K-Drama, Anime, Film & VIP Picks',
         available: true,
         count: counts.iQIYI ?? 0,
-        logo: makeMonoLogo('IQ', '#00BE06', '#09090B', 'border-green-400/35'),
+        logo: <ProviderBrandLogo providerId="iQIYI" name="iQIYI" />,
       },
     ],
     [t, counts]

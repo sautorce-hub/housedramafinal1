@@ -3,9 +3,11 @@ import {
   getLk21CacheFromDb,
   getMovieBySlugFromDb,
   getMovieEpisodesFromDb,
+  getMovieSourcesFromDb,
   getTrendingStatsMapFromDb,
   setLk21CacheInDb,
   upsertMovieEpisodesInDb,
+  upsertMovieSourcesInDb,
   upsertMoviesBatchInDb,
   type LiveDramaBadgeStat,
   type MovieUpsertInput,
@@ -747,6 +749,20 @@ export async function getLk21Detail(
       ...detail.recommendations.map((r, i) => toMovieUpsert(r, 2000 - i * 20)),
     ]);
 
+    if (detail.providers.length > 0) {
+      await upsertMovieSourcesInDb(
+        detail.providers.map((p) => ({
+          slug: detail.slug,
+          episodeNumber: 1,
+          vid: detail.slug,
+          sourceName: p.name || 'LK21',
+          sourceType: 'embed',
+          quality: detail.quality || 'HD',
+          embedUrl: p.url || '',
+        }))
+      );
+    }
+
     if (inserted.length > 0) {
       void notifyMovieAdditionsToGoogle(inserted, fallbackOrigin).catch(() => {});
     }
@@ -933,7 +949,33 @@ export async function getLk21Stream(
     };
   }
 
-  // Also check DB episode cached stream URL if fresh
+  // Check DB movie_sources and movie_episodes cached stream URL if fresh
+  const dbSources = await getMovieSourcesFromDb(
+    cleanSlug || upstreamSlug,
+    resolvedEpNumber
+  );
+  const freshSource = dbSources.find(
+    (s) =>
+      s.streamUrl &&
+      Date.now() - s.updatedAt < STREAM_TTL_MS &&
+      (!targetVid || s.vid === targetVid)
+  );
+  if (freshSource) {
+    return {
+      ok: true,
+      type: freshSource.sourceType === 'mp4' ? 'mp4' : 'hls',
+      url: freshSource.streamUrl,
+      streamUrl: freshSource.streamUrl,
+      isHls: freshSource.sourceType !== 'mp4',
+      title: cleanSlug,
+      poster: '',
+      subtitles: freshSource.subtitles as Lk21StreamPayload['subtitles'],
+      episodeNumber: freshSource.episodeNumber || resolvedEpNumber,
+      slug: freshSource.slug || cleanSlug,
+      vid: freshSource.vid || upstreamSlug,
+    };
+  }
+
   const dbEp = await findMovieEpisodeByVidOrSlugFromDb(upstreamSlug);
   if (
     dbEp &&
@@ -1022,22 +1064,45 @@ export async function getLk21Stream(
     };
 
     await writeCache(cacheKey, 'stream', payload, STREAM_TTL_MS);
-    await upsertMovieEpisodesInDb([
-      {
-        slug: cleanSlug || dbEp?.slug || upstreamSlug,
-        episodeNumber: resolvedEpNumber,
-        vid: upstreamSlug,
-        title: payload.title,
-        episodeLabel: `EP ${resolvedEpNumber}`,
-        streamUrl: finalStreamUrl,
-        rawUrl,
-        streamType: isHls ? 'hls' : 'mp4',
-        subtitles: subtitles as unknown as Array<Record<string, unknown>>,
-      },
+    const resolvedSlug = cleanSlug || dbEp?.slug || upstreamSlug;
+    await Promise.all([
+      upsertMovieEpisodesInDb([
+        {
+          slug: resolvedSlug,
+          episodeNumber: resolvedEpNumber,
+          vid: upstreamSlug,
+          title: payload.title,
+          episodeLabel: `EP ${resolvedEpNumber}`,
+          streamUrl: finalStreamUrl,
+          rawUrl,
+          streamType: isHls ? 'hls' : 'mp4',
+          subtitles: subtitles as unknown as Array<Record<string, unknown>>,
+        },
+      ]),
+      upsertMovieSourcesInDb([
+        {
+          slug: resolvedSlug,
+          episodeNumber: resolvedEpNumber,
+          vid: upstreamSlug,
+          sourceName: 'LK21 Primary',
+          sourceType: isHls ? 'hls' : 'mp4',
+          quality: 'HD',
+          streamUrl: finalStreamUrl,
+          rawUrl,
+          subtitles: subtitles as unknown as Array<Record<string, unknown>>,
+        },
+      ]),
     ]);
 
     return payload;
   });
+}
+
+export async function getLk21StoredSources(
+  slug: string,
+  episode?: number
+) {
+  return getMovieSourcesFromDb(slug, episode);
 }
 
 function isPrivateOrLocalHostname(hostname: string): boolean {

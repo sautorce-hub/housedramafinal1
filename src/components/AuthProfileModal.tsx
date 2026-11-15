@@ -3,6 +3,7 @@ import {
   X,
   Heart,
   Bookmark,
+  Clapperboard,
   HelpCircle,
   LogOut,
   CheckCircle2,
@@ -52,7 +53,8 @@ export const AuthProfileModal: React.FC = () => {
     signOut,
     streak,
     likedDramaIds,
-    myListItems,
+    dramaWatchlistItems,
+    movieWatchlistItems,
     setHelpModalOpen,
   } = useDramaContext();
 
@@ -74,6 +76,19 @@ export const AuthProfileModal: React.FC = () => {
   if (!authModalOpen) return null;
 
   const daysRemaining = Math.max(0, 3 - streak.count);
+
+  const openDashboardWatchlist = (category: 'movie' | 'drama') => {
+    closeAuthModal();
+    window.dispatchEvent(
+      new CustomEvent('hd:navigate', {
+        detail: {
+          tab: 'dashboard',
+          subTab: 'watchlist',
+          watchlistCategory: category,
+        },
+      })
+    );
+  };
 
   return (
     <div
@@ -115,7 +130,7 @@ export const AuthProfileModal: React.FC = () => {
 
         {!user ? (
           <div className="p-5 space-y-5 pb-[max(24px,env(safe-area-inset-bottom))]">
-            {/* Contextual Reason Banner (e.g. triggered by Heart/Like or Comment gate) */}
+            {/* Contextual Reason Banner (e.g. triggered by Movie Watchlist / Heart / Comment gate) */}
             <div className="p-3.5 rounded-2xl bg-[var(--cd-accent-soft)] border border-[var(--cd-accent)]/40 flex items-start gap-2.5">
               <Sparkles className="w-4 h-4 cd-accent-text shrink-0 mt-0.5" />
               <div className="space-y-0.5">
@@ -155,9 +170,25 @@ export const AuthProfileModal: React.FC = () => {
                 </>
               )}
             </button>
+
+            <div className="pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => openDashboardWatchlist('drama')}
+                className="w-full min-h-[42px] px-4 py-2 rounded-2xl bg-[#19161A] hover:bg-[#221D24] border border-white/10 text-xs font-semibold text-white flex items-center justify-between transition-colors"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Bookmark className="w-4 h-4 text-[#D4AF37]" />
+                  <span>
+                    {t.auth.dramaWatchlistCount} ({dramaWatchlistItems.length})
+                  </span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-[#A1A1AA]" />
+              </button>
+            </div>
           </div>
         ) : (
-          /* Signed-in Real Google Profile, Streak & Logout Drawer */
+          /* Signed-in Real Google Profile, Separated Watchlists, Streak & Logout Drawer */
           <div className="p-5 space-y-4 pb-[max(24px,env(safe-area-inset-bottom))]">
             <div className="p-4 rounded-2xl bg-[#19161A] border border-white/10 flex items-center gap-3.5">
               {user.photoURL && !avatarBroken ? (
@@ -227,36 +258,82 @@ export const AuthProfileModal: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-2xl bg-[#19161A] border border-white/10">
-                <div className="flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
-                  <Heart className="w-3.5 h-3.5 text-[#EF4444]" />
-                  <span>{t.auth.likedCount}</span>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="p-3 rounded-2xl bg-[#19161A] border border-white/10">
+                <div className="flex items-center gap-1 text-[10px] text-[#A1A1AA]">
+                  <Heart className="w-3 h-3 text-[#EF4444] shrink-0" />
+                  <span className="truncate">{t.auth.likedCount}</span>
                 </div>
-                <p className="text-xl font-extrabold text-white mt-1 tabular-nums">
+                <p className="text-lg font-extrabold text-white mt-1 tabular-nums">
                   {likedDramaIds.length}
                 </p>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-[#19161A] border border-white/10">
-                <div className="flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
-                  <Bookmark className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  <span>{t.auth.savedCount}</span>
+              <button
+                type="button"
+                onClick={() => openDashboardWatchlist('movie')}
+                className="p-3 rounded-2xl bg-[#19161A] hover:bg-[#221D24] border border-white/10 hover:border-[#E50914]/60 text-left transition-colors"
+              >
+                <div className="flex items-center gap-1 text-[10px] text-[#A1A1AA]">
+                  <Clapperboard className="w-3 h-3 text-[#E50914] shrink-0" />
+                  <span className="truncate">{t.auth.savedCount}</span>
                 </div>
-                <p className="text-xl font-extrabold text-white mt-1 tabular-nums">
-                  {myListItems.length}
+                <p className="text-lg font-extrabold text-white mt-1 tabular-nums">
+                  {movieWatchlistItems.length}
                 </p>
-              </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openDashboardWatchlist('drama')}
+                className="p-3 rounded-2xl bg-[#19161A] hover:bg-[#221D24] border border-white/10 hover:border-[#D4AF37]/60 text-left transition-colors"
+              >
+                <div className="flex items-center gap-1 text-[10px] text-[#A1A1AA]">
+                  <Bookmark className="w-3 h-3 text-[#D4AF37] shrink-0" />
+                  <span className="truncate">{t.auth.dramaWatchlistCount}</span>
+                </div>
+                <p className="text-lg font-extrabold text-white mt-1 tabular-nums">
+                  {dramaWatchlistItems.length}
+                </p>
+              </button>
             </div>
 
-            <div className="space-y-2.5 pt-1">
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => openDashboardWatchlist('movie')}
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-[#19161A] hover:bg-[#221D24] border border-[#E50914]/35 text-xs font-bold text-white flex items-center justify-between transition-all"
+              >
+                <span className="inline-flex items-center gap-2.5">
+                  <Clapperboard className="w-4 h-4 text-[#E50914]" />
+                  <span>
+                    {t.moviesPage.watchlistTitle} ({movieWatchlistItems.length})
+                  </span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-[#E50914]" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openDashboardWatchlist('drama')}
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-[#19161A] hover:bg-[#221D24] border border-[#D4AF37]/30 text-xs font-bold text-white flex items-center justify-between transition-all"
+              >
+                <span className="inline-flex items-center gap-2.5">
+                  <Bookmark className="w-4 h-4 text-[#D4AF37]" />
+                  <span>
+                    {t.sections.dramaWatchlistTitle} ({dramaWatchlistItems.length})
+                  </span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-[#D4AF37]" />
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
                   closeAuthModal();
                   window.dispatchEvent(
                     new CustomEvent('hd:navigate', {
-                      detail: { tab: 'dashboard' },
+                      detail: { tab: 'dashboard', subTab: 'profile' },
                     })
                   );
                 }}

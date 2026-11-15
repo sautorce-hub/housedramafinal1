@@ -22,7 +22,7 @@ import type {
   EpisodeComment,
   GoogleUser,
   LanguageCode,
-  ProviderName,
+  MediaProviderName,
   ReactionKey,
   SubtitleStyleConfig,
   ToastItem,
@@ -31,7 +31,8 @@ import type {
   WatchStatusFilter,
 } from '../types/drama';
 
-const MY_LIST_STORAGE_KEY = 'house_drama_mylist_v2';
+const MOVIE_WATCHLIST_STORAGE_PREFIX = 'house_drama_movie_watchlist_v1_';
+const DRAMA_WATCHLIST_STORAGE_KEY = 'house_drama_drama_watchlist_v1';
 const LIKED_DRAMAS_STORAGE_KEY = 'house_drama_liked_v1';
 const COMPLETED_DRAMAS_STORAGE_KEY = 'house_drama_completed_v1';
 const HISTORY_STORAGE_KEY = 'house_drama_history_v2';
@@ -161,7 +162,7 @@ interface DramaContextValue {
     Array<
       EpisodeComment & {
         dramaId: string;
-        provider: ProviderName;
+        provider: MediaProviderName;
         episodeNumber: number;
       }
     >
@@ -176,14 +177,16 @@ interface DramaContextValue {
   subtitleStyle: SubtitleStyleConfig;
   setSubtitleStyle: (style: SubtitleStyleConfig) => void;
   myListItems: DramaItem[];
+  dramaWatchlistItems: DramaItem[];
+  movieWatchlistItems: DramaItem[];
   myListIds: string[];
   toggleMyList: (drama: DramaItem, folderId?: string) => void;
-  isDramaSaved: (bookId: string, provider?: ProviderName) => boolean;
+  isDramaSaved: (bookId: string, provider?: MediaProviderName) => boolean;
   likedDramaIds: string[];
-  isDramaLiked: (bookId: string, provider?: ProviderName) => boolean;
+  isDramaLiked: (bookId: string, provider?: MediaProviderName) => boolean;
   toggleLikeDrama: (drama: DramaItem) => void;
   completedDramaIds: string[];
-  toggleDramaCompleted: (bookId: string, provider: ProviderName) => void;
+  toggleDramaCompleted: (bookId: string, provider: MediaProviderName) => void;
   getDramaWatchStatus: (
     drama: DramaItem
   ) => Exclude<WatchStatusFilter, 'all'>;
@@ -193,10 +196,10 @@ interface DramaContextValue {
   deleteWatchlistFolder: (folderId: string) => void;
   assignDramaToFolder: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     folderId: string
   ) => void;
-  getDramaFolderId: (bookId: string, provider: ProviderName) => string;
+  getDramaFolderId: (bookId: string, provider: MediaProviderName) => string;
   watchHistory: WatchHistoryEntry[];
   recordWatchProgress: (
     drama: DramaItem,
@@ -205,54 +208,54 @@ interface DramaContextValue {
     duration?: number,
     immediate?: boolean
   ) => void;
-  removeHistoryItem: (bookId: string, provider?: ProviderName) => void;
+  removeHistoryItem: (bookId: string, provider?: MediaProviderName) => void;
   getResumePoint: (
     bookId: string,
-    provider?: ProviderName
+    provider?: MediaProviderName
   ) => { episode: number; currentTime: number; progress: number } | null;
-  getWatchedEpisodes: (bookId: string, provider: ProviderName) => number[];
-  getDramaRating: (bookId: string, provider: ProviderName) => number;
+  getWatchedEpisodes: (bookId: string, provider: MediaProviderName) => number[];
+  getDramaRating: (bookId: string, provider: MediaProviderName) => number;
   setDramaRating: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     stars: number
   ) => void;
   getEpisodeReactions: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number
   ) => Record<ReactionKey, number>;
   addEpisodeReaction: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number,
     key: ReactionKey
   ) => void;
   syncEpisodeComments: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number
   ) => Promise<void>;
   getEpisodeComments: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number
   ) => EpisodeComment[];
   addEpisodeComment: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number,
     text: string,
     videoTimestampSec?: number
   ) => Promise<boolean>;
   isEpisodeUnlocked: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number
   ) => boolean;
   unlockVipEpisode: (
     bookId: string,
-    provider: ProviderName,
+    provider: MediaProviderName,
     episode: number
   ) => void;
   recentSearches: string[];
@@ -268,7 +271,7 @@ interface DramaContextValue {
   dismissToast: (id: string) => void;
   getDramaLiveStats: (
     bookId: string,
-    provider?: ProviderName
+    provider?: MediaProviderName
   ) => {
     dailyViews: number;
     totalViews: number;
@@ -278,13 +281,13 @@ interface DramaContextValue {
 
 const DramaContext = createContext<DramaContextValue | null>(null);
 
-function makeItemKey(bookId: string, provider: ProviderName = 'DramaBox') {
+function makeItemKey(bookId: string, provider: MediaProviderName = 'DramaBox') {
   return `${provider}:${bookId}`;
 }
 
 function makeEpisodeKey(
   bookId: string,
-  provider: ProviderName,
+  provider: MediaProviderName,
   episode: number
 ) {
   const safeId = bookId.replace(/[^a-zA-Z0-9_\-:]/g, '_');
@@ -315,6 +318,14 @@ function streakStorageKey(uid: string): string {
 
 function legacyStreakStorageKey(uid: string): string {
   return `coffee_drama_streak_v1_${uid}`;
+}
+
+function movieWatchlistStorageKey(uid: string): string {
+  return `${MOVIE_WATCHLIST_STORAGE_PREFIX}${uid}`;
+}
+
+function isMovieMedia(drama: Pick<DramaItem, 'provider' | 'mediaType'>): boolean {
+  return drama.provider === 'LK21' || drama.mediaType === 'movie';
 }
 
 function getPersistentVisitorId(): string {
@@ -389,16 +400,14 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
       )
   );
 
-  const [myListItems, setMyListItems] = useState<DramaItem[]>(() => {
-    const parsed = readJsonStorage<DramaItem[]>(
-      MY_LIST_STORAGE_KEY,
+  const [movieListItemsRaw, setMovieListItemsRaw] = useState<DramaItem[]>([]);
+  const [dramaListItems, setDramaListItems] = useState<DramaItem[]>(() =>
+    readJsonStorage<DramaItem[]>(
+      DRAMA_WATCHLIST_STORAGE_KEY,
       [],
-      'coffee_drama_mylist_v2'
-    );
-    return Array.isArray(parsed)
-      ? parsed.map((d) => ({ ...d, provider: d.provider || 'DramaBox' }))
-      : [];
-  });
+      'coffee_drama_mylist_v1'
+    ).filter((d) => d && d.bookId && !isMovieMedia(d))
+  );
 
   const [likedDramaIds, setLikedDramaIds] = useState<string[]>(() =>
     readJsonStorage<string[]>(
@@ -446,7 +455,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
           return parsed
             .filter((e) => e && e.drama && e.drama.bookId)
             .map((entry) => {
-              const prov: ProviderName =
+              const prov: MediaProviderName =
                 entry.provider || entry.drama?.provider || 'DramaBox';
               return {
                 bookId: entry.bookId || entry.drama.bookId,
@@ -703,7 +712,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
       const json = (await res.json()) as {
         items?: Array<{
           bookId: string;
-          provider: ProviderName;
+          provider: MediaProviderName;
           episode: number;
           currentTime: number;
           duration: number;
@@ -716,7 +725,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
       const remoteEntries: WatchHistoryEntry[] = json.items
         .filter((e) => e && e.bookId)
         .map((e) => {
-          const prov = (e.provider || 'DramaBox') as ProviderName;
+          const prov = (e.provider || 'DramaBox') as MediaProviderName;
           const d = e.drama || {};
           const dramaObj: DramaItem = {
             bookId: e.bookId,
@@ -767,12 +776,17 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // Hydrate authenticated user's Favorites, Likes & Watch History from PostgreSQL
+  // Hydrate authenticated user's Movie & Drama Watchlist, Likes & Watch History from PostgreSQL
   const hydrateUserLibraryFromPostgres = useCallback(
     async (uid: string) => {
       try {
+        const cachedUserMovies = readJsonStorage<DramaItem[]>(
+          movieWatchlistStorageKey(uid),
+          []
+        ).filter((d) => d && d.bookId && isMovieMedia(d));
+
         const [favRes, likeRes] = await Promise.allSettled([
-          fetch(`/api/favorites?userId=${encodeURIComponent(uid)}&limit=100`),
+          fetch(`/api/favorites?userId=${encodeURIComponent(uid)}&limit=200`),
           fetch(`/api/likes?userId=${encodeURIComponent(uid)}&limit=100`),
           hydrateWatchHistoryFromPostgres(uid),
         ]);
@@ -781,21 +795,26 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
           const favJson = (await favRes.value.json()) as {
             items?: Array<{
               dramaId: string;
-              provider: ProviderName;
+              provider: MediaProviderName;
+              mediaType?: 'drama' | 'movie';
               folderId: string;
               drama?: Partial<DramaItem>;
             }>;
           };
-          if (Array.isArray(favJson.items) && favJson.items.length > 0) {
-            const remoteDramas: DramaItem[] = [];
-            const remoteFolders: Record<string, string> = {};
+          const remoteMovies: DramaItem[] = [];
+          const remoteDramas: DramaItem[] = [];
+          const remoteFolders: Record<string, string> = {};
+          if (Array.isArray(favJson.items)) {
             for (const entry of favJson.items) {
               if (!entry.dramaId) continue;
-              const prov = (entry.provider || 'DramaBox') as ProviderName;
+              const prov = (entry.provider || 'LK21') as MediaProviderName;
+              const resolvedType =
+                entry.mediaType ?? (prov === 'LK21' ? 'movie' : 'drama');
+              const isMovieEntry = resolvedType === 'movie' || prov === 'LK21';
               const d = entry.drama ?? {};
               const item: DramaItem = {
                 bookId: entry.dramaId,
-                title: d.title || 'Saved Drama',
+                title: d.title || (isMovieEntry ? 'Saved Movie' : 'Saved Drama'),
                 slug: d.slug,
                 cover: d.cover || '',
                 description: d.description || '',
@@ -807,36 +826,73 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
                 author: d.author,
                 isVip: Boolean(d.isVip),
                 provider: prov,
+                mediaType: isMovieEntry ? 'movie' : 'drama',
+                year: d.year,
+                rating: d.rating,
+                quality: d.quality,
+                area: d.area,
               };
-              remoteDramas.push(item);
+              if (isMovieEntry) {
+                remoteMovies.push(item);
+              } else {
+                remoteDramas.push(item);
+              }
               if (entry.folderId && entry.folderId !== 'all') {
                 remoteFolders[makeItemKey(entry.dramaId, prov)] = entry.folderId;
               }
             }
-            setMyListItems((prev) => {
-              const seen = new Set(remoteDramas.map((d) => makeItemKey(d.bookId, d.provider)));
-              const localOnly = prev.filter((d) => !seen.has(makeItemKey(d.bookId, d.provider)));
-              return [...remoteDramas, ...localOnly];
-            });
-            if (Object.keys(remoteFolders).length > 0) {
-              setItemFolderMap((prev) => ({ ...prev, ...remoteFolders }));
-            }
           }
+
+          setMovieListItemsRaw((prev) => {
+            const seen = new Set(
+              remoteMovies.map((d) => makeItemKey(d.bookId, d.provider))
+            );
+            const fallbackLocal = [...prev, ...cachedUserMovies].filter(
+              (d) =>
+                isMovieMedia(d) && !seen.has(makeItemKey(d.bookId, d.provider))
+            );
+            const uniqueFallback = Array.from(
+              new Map(
+                fallbackLocal.map((d) => [makeItemKey(d.bookId, d.provider), d])
+              ).values()
+            );
+            return [...remoteMovies, ...uniqueFallback];
+          });
+
+          if (remoteDramas.length > 0) {
+            setDramaListItems((prev) => {
+              const seen = new Set(
+                remoteDramas.map((d) => makeItemKey(d.bookId, d.provider))
+              );
+              const keepLocal = prev.filter(
+                (d) =>
+                  !isMovieMedia(d) &&
+                  !seen.has(makeItemKey(d.bookId, d.provider))
+              );
+              return [...remoteDramas, ...keepLocal];
+            });
+          }
+
+          if (Object.keys(remoteFolders).length > 0) {
+            setItemFolderMap((prev) => ({ ...prev, ...remoteFolders }));
+          }
+        } else if (cachedUserMovies.length > 0) {
+          setMovieListItemsRaw(cachedUserMovies);
         }
 
         if (likeRes.status === 'fulfilled' && likeRes.value.ok) {
           const likeJson = (await likeRes.value.json()) as {
-            items?: Array<{ dramaId: string; provider: ProviderName }>;
+            items?: Array<{ dramaId: string; provider: MediaProviderName }>;
           };
           if (Array.isArray(likeJson.items) && likeJson.items.length > 0) {
             const remoteKeys = likeJson.items.map((l) =>
-              makeItemKey(l.dramaId, (l.provider || 'DramaBox') as ProviderName)
+              makeItemKey(l.dramaId, (l.provider || 'DramaBox') as MediaProviderName)
             );
             setLikedDramaIds((prev) => Array.from(new Set([...remoteKeys, ...prev])));
           }
         }
       } catch {
-        // Keep local library gracefully
+        // Keep user library gracefully
       }
     },
     [hydrateWatchHistoryFromPostgres]
@@ -854,11 +910,19 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
         const mapped = mapFirebaseUser(fbUser);
         setUser(mapped);
         setAuthError(null);
+        const cachedUserMovies = readJsonStorage<DramaItem[]>(
+          movieWatchlistStorageKey(mapped.uid),
+          []
+        ).filter((d) => d && d.bookId && isMovieMedia(d));
+        if (cachedUserMovies.length > 0) {
+          setMovieListItemsRaw(cachedUserMovies);
+        }
         void syncUserStreak(mapped);
         void hydrateUserLibraryFromPostgres(mapped.uid);
       } else {
         setUser(null);
         setStreak(EMPTY_STREAK);
+        setMovieListItemsRaw([]);
       }
       setAuthLoading(false);
     });
@@ -897,11 +961,26 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     try {
-      localStorage.setItem(MY_LIST_STORAGE_KEY, JSON.stringify(myListItems));
+      localStorage.setItem(
+        DRAMA_WATCHLIST_STORAGE_KEY,
+        JSON.stringify(dramaListItems)
+      );
     } catch {
       // Ignore
     }
-  }, [myListItems]);
+  }, [dramaListItems]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    try {
+      localStorage.setItem(
+        movieWatchlistStorageKey(user.uid),
+        JSON.stringify(movieListItemsRaw)
+      );
+    } catch {
+      // Ignore
+    }
+  }, [user?.uid, movieListItemsRaw]);
 
   useEffect(() => {
     try {
@@ -1093,6 +1172,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
       // Ignore
     }
     setUser(null);
+    setMovieListItemsRaw([]);
     setStreak(EMPTY_STREAK);
     setAuthModalOpen(false);
     pushToast('Signed out', 'neutral');
@@ -1223,7 +1303,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
         comments?: Array<
           EpisodeComment & {
             dramaId: string;
-            provider: ProviderName;
+            provider: MediaProviderName;
             episodeNumber: number;
           }
         >;
@@ -1234,55 +1314,157 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [user]);
 
-  const toggleMyList = useCallback(
-    (drama: DramaItem, folderId = 'all') => {
-      const key = makeItemKey(drama.bookId, drama.provider);
-      setMyListItems((prev) => {
+  const executeToggleMovieWatchlist = useCallback(
+    (activeUser: GoogleUser, drama: DramaItem, folderId = 'all') => {
+      const normalizedMovie: DramaItem = {
+        ...drama,
+        mediaType: 'movie',
+      };
+      const key = makeItemKey(normalizedMovie.bookId, normalizedMovie.provider);
+      setMovieListItemsRaw((prev) => {
         const exists = prev.some(
-          (d) => d.bookId === drama.bookId && d.provider === drama.provider
+          (d) =>
+            d.bookId === normalizedMovie.bookId &&
+            d.provider === normalizedMovie.provider
         );
         if (exists) {
-          pushToast(`Removed "${drama.title}"`, 'neutral');
+          pushToast(`Removed "${normalizedMovie.title}"`, 'neutral');
           return prev.filter(
-            (d) => !(d.bookId === drama.bookId && d.provider === drama.provider)
+            (d) =>
+              !(
+                d.bookId === normalizedMovie.bookId &&
+                d.provider === normalizedMovie.provider
+              )
           );
         }
         if (folderId && folderId !== 'all') {
           setItemFolderMap((m) => ({ ...m, [key]: folderId }));
         }
-        pushToast(`Saved "${drama.title}"`, 'gold');
-        return [drama, ...prev];
+        pushToast(`Saved "${normalizedMovie.title}" to Movie Watchlist`, 'gold');
+        return [normalizedMovie, ...prev];
       });
 
-      if (user) {
+      void fetch('/api/favorites/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: activeUser.uid,
+          dramaId: normalizedMovie.bookId,
+          provider: normalizedMovie.provider,
+          mediaType: 'movie',
+          folderId,
+          title: normalizedMovie.title,
+          cover: normalizedMovie.cover,
+          drama: normalizedMovie,
+        }),
+      }).catch(() => {});
+    },
+    [pushToast]
+  );
+
+  const executeToggleDramaWatchlist = useCallback(
+    (drama: DramaItem, folderId = 'all', activeUser?: GoogleUser | null) => {
+      const normalizedDrama: DramaItem = {
+        ...drama,
+        mediaType: 'drama',
+      };
+      const key = makeItemKey(normalizedDrama.bookId, normalizedDrama.provider);
+      setDramaListItems((prev) => {
+        const exists = prev.some(
+          (d) =>
+            d.bookId === normalizedDrama.bookId &&
+            d.provider === normalizedDrama.provider
+        );
+        if (exists) {
+          pushToast(`Removed "${normalizedDrama.title}"`, 'neutral');
+          return prev.filter(
+            (d) =>
+              !(
+                d.bookId === normalizedDrama.bookId &&
+                d.provider === normalizedDrama.provider
+              )
+          );
+        }
+        if (folderId && folderId !== 'all') {
+          setItemFolderMap((m) => ({ ...m, [key]: folderId }));
+        }
+        pushToast(`Saved "${normalizedDrama.title}" to Drama Watchlist`, 'gold');
+        return [normalizedDrama, ...prev];
+      });
+
+      if (activeUser?.uid) {
         void fetch('/api/favorites/toggle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId: user.uid,
-            dramaId: drama.bookId,
-            provider: drama.provider,
+            userId: activeUser.uid,
+            dramaId: normalizedDrama.bookId,
+            provider: normalizedDrama.provider,
+            mediaType: 'drama',
             folderId,
-            title: drama.title,
-            cover: drama.cover,
-            drama,
+            title: normalizedDrama.title,
+            cover: normalizedDrama.cover,
+            drama: normalizedDrama,
           }),
         }).catch(() => {});
       }
     },
-    [pushToast, user]
+    [pushToast]
+  );
+
+  const toggleMyList = useCallback(
+    (drama: DramaItem, folderId = 'all') => {
+      if (isMovieMedia(drama)) {
+        if (!user) {
+          openAuthModal(
+            TRANSLATIONS[language].auth.gateWatchlistReason,
+            (signedInUser) => {
+              executeToggleMovieWatchlist(signedInUser, drama, folderId);
+            }
+          );
+          return;
+        }
+        executeToggleMovieWatchlist(user, drama, folderId);
+        return;
+      }
+
+      executeToggleDramaWatchlist(drama, folderId, user);
+    },
+    [
+      user,
+      language,
+      openAuthModal,
+      executeToggleMovieWatchlist,
+      executeToggleDramaWatchlist,
+    ]
+  );
+
+  const movieWatchlistItems = useMemo(
+    () => (user ? movieListItemsRaw.filter((d) => isMovieMedia(d)) : []),
+    [user, movieListItemsRaw]
+  );
+
+  const dramaWatchlistItems = useMemo(
+    () => dramaListItems.filter((d) => !isMovieMedia(d)),
+    [dramaListItems]
+  );
+
+  const myListItems = useMemo(
+    () => [...movieWatchlistItems, ...dramaWatchlistItems],
+    [movieWatchlistItems, dramaWatchlistItems]
   );
 
   const isDramaSaved = useCallback(
-    (bookId: string, provider?: ProviderName) =>
-      myListItems.some(
+    (bookId: string, provider?: MediaProviderName) => {
+      return myListItems.some(
         (d) => d.bookId === bookId && (!provider || d.provider === provider)
-      ),
+      );
+    },
     [myListItems]
   );
 
   const isDramaLiked = useCallback(
-    (bookId: string, provider: ProviderName = 'DramaBox') =>
+    (bookId: string, provider: MediaProviderName = 'DramaBox') =>
       likedDramaIds.includes(makeItemKey(bookId, provider)),
     [likedDramaIds]
   );
@@ -1299,27 +1481,32 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
             return prev.filter((k) => k !== key);
           }
           pushToast(`Liked "${drama.title}"`, 'gold');
-          setMyListItems((listPrev) => {
-            const alreadySaved = listPrev.some(
-              (d) =>
-                d.bookId === drama.bookId && d.provider === drama.provider
-            );
-            return alreadySaved ? listPrev : [drama, ...listPrev];
-          });
-          void fetch('/api/favorites/toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: activeUser.uid,
-              dramaId: drama.bookId,
-              provider: drama.provider,
-              folderId: 'all',
-              title: drama.title,
-              cover: drama.cover,
-              drama,
-              forceSave: true,
-            }),
-          }).catch(() => {});
+          if (isMovieMedia(drama)) {
+            const movieItem: DramaItem = { ...drama, mediaType: 'movie' };
+            setMovieListItemsRaw((listPrev) => {
+              const alreadySaved = listPrev.some(
+                (d) =>
+                  d.bookId === movieItem.bookId &&
+                  d.provider === movieItem.provider
+              );
+              return alreadySaved ? listPrev : [movieItem, ...listPrev];
+            });
+            void fetch('/api/favorites/toggle', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: activeUser.uid,
+                dramaId: movieItem.bookId,
+                provider: movieItem.provider,
+                mediaType: 'movie',
+                folderId: 'all',
+                title: movieItem.title,
+                cover: movieItem.cover,
+                drama: movieItem,
+                forceSave: true,
+              }),
+            }).catch(() => {});
+          }
           return [key, ...prev];
         });
 
@@ -1330,6 +1517,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
             userId: activeUser.uid,
             dramaId: drama.bookId,
             provider: drama.provider,
+            mediaType: isMovieMedia(drama) ? 'movie' : 'drama',
           }),
         }).catch(() => {});
       });
@@ -1338,7 +1526,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const toggleDramaCompleted = useCallback(
-    (bookId: string, provider: ProviderName) => {
+    (bookId: string, provider: MediaProviderName) => {
       const key = makeItemKey(bookId, provider);
       setCompletedDramaIds((prev) =>
         prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
@@ -1394,7 +1582,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const assignDramaToFolder = useCallback(
-    (bookId: string, provider: ProviderName, folderId: string) => {
+    (bookId: string, provider: MediaProviderName, folderId: string) => {
       const key = makeItemKey(bookId, provider);
       setItemFolderMap((prev) => {
         const next = { ...prev };
@@ -1405,7 +1593,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
         }
         return next;
       });
-      if (user) {
+      if (user?.uid) {
         void fetch('/api/favorites/folder', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -1422,7 +1610,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const getDramaFolderId = useCallback(
-    (bookId: string, provider: ProviderName) => {
+    (bookId: string, provider: MediaProviderName) => {
       return itemFolderMap[makeItemKey(bookId, provider)] ?? 'all';
     },
     [itemFolderMap]
@@ -1568,6 +1756,8 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
             userId: actorId,
             dramaId: drama.bookId,
             provider: drama.provider,
+            mediaType:
+              drama.mediaType ?? (drama.provider === 'LK21' ? 'movie' : 'drama'),
             episodeNumber: episode,
             currentTime: resolvedTime,
             duration: resolvedDuration,
@@ -1581,14 +1771,14 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const getDramaLiveStats = useCallback(
-    (bookId: string, provider: ProviderName = 'DramaBox') => {
+    (bookId: string, provider: MediaProviderName = 'DramaBox') => {
       return liveBadgeMap[makeItemKey(bookId, provider)] ?? null;
     },
     [liveBadgeMap]
   );
 
   const removeHistoryItem = useCallback(
-    (bookId: string, provider?: ProviderName) => {
+    (bookId: string, provider?: MediaProviderName) => {
       setWatchHistory((prev) =>
         prev.filter(
           (item) =>
@@ -1612,7 +1802,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const getResumePoint = useCallback(
-    (bookId: string, provider?: ProviderName) => {
+    (bookId: string, provider?: MediaProviderName) => {
       const found = watchHistory.find(
         (h) => h.bookId === bookId && (!provider || h.provider === provider)
       );
@@ -1627,21 +1817,21 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const getWatchedEpisodes = useCallback(
-    (bookId: string, provider: ProviderName) => {
+    (bookId: string, provider: MediaProviderName) => {
       return watchedMap[makeItemKey(bookId, provider)] ?? [];
     },
     [watchedMap]
   );
 
   const getDramaRating = useCallback(
-    (bookId: string, provider: ProviderName) => {
+    (bookId: string, provider: MediaProviderName) => {
       return ratingsMap[makeItemKey(bookId, provider)] ?? 0;
     },
     [ratingsMap]
   );
 
   const setDramaRating = useCallback(
-    (bookId: string, provider: ProviderName, stars: number) => {
+    (bookId: string, provider: MediaProviderName, stars: number) => {
       const safe = Math.min(5, Math.max(1, Math.round(stars)));
       setRatingsMap((prev) => ({
         ...prev,
@@ -1655,7 +1845,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   const getEpisodeReactions = useCallback(
     (
       bookId: string,
-      provider: ProviderName,
+      provider: MediaProviderName,
       episode: number
     ): Record<ReactionKey, number> => {
       const existing = reactionsMap[makeEpisodeKey(bookId, provider, episode)];
@@ -1674,7 +1864,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   const addEpisodeReaction = useCallback(
     (
       bookId: string,
-      provider: ProviderName,
+      provider: MediaProviderName,
       episode: number,
       key: ReactionKey
     ) => {
@@ -1702,7 +1892,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const syncEpisodeComments = useCallback(
-    async (bookId: string, provider: ProviderName, episode: number) => {
+    async (bookId: string, provider: MediaProviderName, episode: number) => {
       const epKey = makeEpisodeKey(bookId, provider, episode);
       try {
         const params = new URLSearchParams({
@@ -1746,7 +1936,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const getEpisodeComments = useCallback(
-    (bookId: string, provider: ProviderName, episode: number) => {
+    (bookId: string, provider: MediaProviderName, episode: number) => {
       return commentsMap[makeEpisodeKey(bookId, provider, episode)] ?? [];
     },
     [commentsMap]
@@ -1755,7 +1945,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   const addEpisodeComment = useCallback(
     async (
       bookId: string,
-      provider: ProviderName,
+      provider: MediaProviderName,
       episode: number,
       text: string,
       videoTimestampSec = 0
@@ -1836,7 +2026,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const isEpisodeUnlocked = useCallback(
-    (bookId: string, provider: ProviderName, episode: number) => {
+    (bookId: string, provider: MediaProviderName, episode: number) => {
       if (episode <= 10) return true;
       return unlockedVipList.includes(makeEpisodeKey(bookId, provider, episode));
     },
@@ -1844,7 +2034,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const unlockVipEpisode = useCallback(
-    (bookId: string, provider: ProviderName, episode: number) => {
+    (bookId: string, provider: MediaProviderName, episode: number) => {
       const epKey = makeEpisodeKey(bookId, provider, episode);
       setUnlockedVipList((prev) =>
         prev.includes(epKey) ? prev : [...prev, epKey]
@@ -1939,6 +2129,8 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
       subtitleStyle,
       setSubtitleStyle,
       myListItems,
+      dramaWatchlistItems,
+      movieWatchlistItems,
       myListIds,
       toggleMyList,
       isDramaSaved,
@@ -2007,6 +2199,8 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
       subtitleStyle,
       setSubtitleStyle,
       myListItems,
+      dramaWatchlistItems,
+      movieWatchlistItems,
       myListIds,
       toggleMyList,
       isDramaSaved,

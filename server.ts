@@ -57,20 +57,13 @@ import {
   notifyGoogleIndexingUrls,
 } from './server/googleIndexing.ts';
 import {
-  fetchAndRewriteLk21M3u8,
-  fetchLk21Segment,
-  getLk21Category,
   getLk21Detail,
   getLk21Episodes,
-  getLk21Home,
-  getLk21Latest,
-  getLk21Menu,
-  getLk21Search,
-  getLk21Stream,
   startLk21Prewarm,
   type Lk21DetailPayload,
   type Lk21EpisodePayloadItem,
 } from './server/lk21Service.ts';
+import { createLk21Router } from './server/lk21Router.ts';
 import {
   CURATED_PROGRAMMATIC_PAGES,
   type ProgrammaticLandingConfig,
@@ -1148,196 +1141,15 @@ async function startServer() {
     return val;
   }
 
-  // --- Dedicated LK21 Movies API Server Proxy & PostgreSQL Cache Routes ---
+  // --- Dedicated LK21 Movies API Router (/api/lk21/...) ---
   // MOLA_API_TOKEN is injected strictly inside lk21Service on the server and never sent to the client.
-
-  app.get('/api/lk21/home', async (req: Request, res: Response) => {
-    try {
-      const data = await getLk21Home(getMolaToken, resolveOrigin(req));
-      res.setHeader('Cache-Control', 'public, max-age=120');
-      res.json(data);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 home catalog',
-      });
-    }
-  });
-
-  app.get('/api/lk21/menu', async (_req: Request, res: Response) => {
-    try {
-      const data = await getLk21Menu(getMolaToken);
-      res.setHeader('Cache-Control', 'public, max-age=1800');
-      res.json(data);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 menu',
-      });
-    }
-  });
-
-  app.get('/api/lk21/latest', async (req: Request, res: Response) => {
-    try {
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const data = await getLk21Latest(getMolaToken, page, resolveOrigin(req));
-      res.setHeader('Cache-Control', 'public, max-age=120');
-      res.json(data);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 latest movies',
-      });
-    }
-  });
-
-  app.get('/api/lk21/category', async (req: Request, res: Response) => {
-    try {
-      const key = cleanText(req.query.key, 'lk21.featured');
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const data = await getLk21Category(
-        getMolaToken,
-        key,
-        page,
-        resolveOrigin(req)
-      );
-      res.setHeader('Cache-Control', 'public, max-age=180');
-      res.json(data);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 category',
-      });
-    }
-  });
-
-  app.get('/api/lk21/search', async (req: Request, res: Response) => {
-    try {
-      const q = cleanText(req.query.q);
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const data = await getLk21Search(getMolaToken, q, page, resolveOrigin(req));
-      res.json(data);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to search LK21 movies',
-      });
-    }
-  });
-
-  app.get('/api/lk21/detail', async (req: Request, res: Response) => {
-    try {
-      const slug = cleanText(req.query.slug);
-      if (!slug) {
-        res.status(400).json({ ok: false, error: 'Missing slug query parameter' });
-        return;
-      }
-      const detail = await getLk21Detail(getMolaToken, slug, resolveOrigin(req));
-      if (!detail) {
-        res.status(404).json({ ok: false, error: 'Movie not found' });
-        return;
-      }
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      res.json(detail);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 movie detail',
-      });
-    }
-  });
-
-  app.get('/api/lk21/episodes', async (req: Request, res: Response) => {
-    try {
-      const slug = cleanText(req.query.slug);
-      if (!slug) {
-        res.status(400).json({ ok: false, error: 'Missing slug query parameter' });
-        return;
-      }
-      const eps = await getLk21Episodes(getMolaToken, slug);
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      res.json(eps);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 episodes',
-      });
-    }
-  });
-
-  app.get('/api/lk21/stream', async (req: Request, res: Response) => {
-    try {
-      const slug = cleanText(req.query.slug);
-      const vid = cleanText(req.query.vid) || undefined;
-      const episodeRaw = Number(req.query.episode);
-      const episode =
-        Number.isFinite(episodeRaw) && episodeRaw > 0 ? episodeRaw : undefined;
-      if (!slug && !vid) {
-        res.status(400).json({ ok: false, error: 'Missing slug query parameter' });
-        return;
-      }
-      const stream = await getLk21Stream(getMolaToken, { slug, vid, episode });
-      res.json(stream);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load LK21 stream',
-      });
-    }
-  });
-
-  app.get('/api/lk21/proxy/m3u8', async (req: Request, res: Response) => {
-    const rawUrl = cleanText(req.query.url);
-    if (!rawUrl) {
-      res.status(400).json({ ok: false, error: 'Missing url query parameter' });
-      return;
-    }
-    try {
-      const { status, body } = await fetchAndRewriteLk21M3u8(getMolaToken, rawUrl);
-      res.status(status);
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.send(body);
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to proxy LK21 m3u8',
-      });
-    }
-  });
-
-  app.get('/api/lk21/proxy/segment', async (req: Request, res: Response) => {
-    const rawUrl = cleanText(req.query.url);
-    if (!rawUrl) {
-      res.status(400).json({ ok: false, error: 'Missing url query parameter' });
-      return;
-    }
-    try {
-      const seg = await fetchLk21Segment(rawUrl, req.get('range'));
-      res.status(seg.status);
-      res.setHeader('Content-Type', seg.contentType);
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      if (seg.contentLength) res.setHeader('Content-Length', seg.contentLength);
-      if (seg.contentRange) res.setHeader('Content-Range', seg.contentRange);
-      if (seg.acceptRanges) res.setHeader('Accept-Ranges', seg.acceptRanges);
-
-      if (seg.upstream.body) {
-        Readable.fromWeb(
-          seg.upstream.body as unknown as import('node:stream/web').ReadableStream
-        ).pipe(res);
-      } else {
-        const buf = Buffer.from(await seg.upstream.arrayBuffer());
-        res.send(buf);
-      }
-    } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to proxy LK21 segment',
-      });
-    }
-  });
+  app.use(
+    '/api/lk21',
+    createLk21Router({
+      getToken: getMolaToken,
+      resolveOrigin,
+    })
+  );
 
   // Mandatory server-side gateway for all https://api.molatv.id/api/* requests.
   // Injects MOLA_API_TOKEN exclusively on the server and strips embedded tokens from responses.
@@ -2429,13 +2241,16 @@ async function startServer() {
   app.get('/api/favorites', async (req: Request, res: Response) => {
     try {
       const userId = cleanText(req.query.userId);
-      if (!userId) {
-        res.status(400).json({ ok: false, error: 'Missing userId' });
+      if (!userId || userId.startsWith('v-')) {
+        res.status(401).json({ ok: false, error: 'Authentication required to view Movie Watchlist' });
         return;
       }
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
       const offset = Math.max(0, Number(req.query.offset) || 0);
-      const result = await listFavoritesFromDb(userId, limit, offset);
+      const mediaTypeRaw = cleanText(req.query.mediaType);
+      const mediaType: 'movie' | 'drama' | undefined =
+        mediaTypeRaw === 'movie' || mediaTypeRaw === 'drama' ? mediaTypeRaw : undefined;
+      const result = await listFavoritesFromDb(userId, limit, offset, mediaType);
       res.json({ ok: true, ...result, limit, offset });
     } catch (err) {
       res.status(500).json({
@@ -2449,19 +2264,27 @@ async function startServer() {
     try {
       const userId = cleanText(req.body?.userId);
       const dramaId = cleanText(req.body?.dramaId);
-      const provider = cleanText(req.body?.provider, 'DramaBox');
-      if (!userId || !dramaId) {
-        res.status(400).json({ ok: false, error: 'userId and dramaId are required' });
+      const provider = cleanText(req.body?.provider, 'LK21');
+      if (!userId || userId.startsWith('v-')) {
+        res.status(401).json({ ok: false, error: 'Authentication required to save to Movie Watchlist' });
+        return;
+      }
+      if (!dramaId) {
+        res.status(400).json({ ok: false, error: 'dramaId is required' });
         return;
       }
       const dramaObj =
         req.body?.drama && typeof req.body.drama === 'object'
           ? (req.body.drama as Record<string, unknown>)
           : undefined;
+      const mediaTypeRaw = cleanText(req.body?.mediaType);
+      const mediaType: 'movie' | 'drama' | undefined =
+        mediaTypeRaw === 'movie' || mediaTypeRaw === 'drama' ? mediaTypeRaw : undefined;
       const result = await toggleFavoriteInDb({
         userId,
         dramaId,
         provider,
+        mediaType,
         folderId: cleanText(req.body?.folderId, 'all'),
         title: cleanText(req.body?.title ?? dramaObj?.title),
         cover: cleanText(req.body?.cover ?? dramaObj?.cover),
@@ -2481,10 +2304,14 @@ async function startServer() {
     try {
       const userId = cleanText(req.body?.userId);
       const dramaId = cleanText(req.body?.dramaId);
-      const provider = cleanText(req.body?.provider, 'DramaBox');
+      const provider = cleanText(req.body?.provider, 'LK21');
       const folderId = cleanText(req.body?.folderId, 'all');
-      if (!userId || !dramaId) {
-        res.status(400).json({ ok: false, error: 'userId and dramaId are required' });
+      if (!userId || userId.startsWith('v-')) {
+        res.status(401).json({ ok: false, error: 'Authentication required' });
+        return;
+      }
+      if (!dramaId) {
+        res.status(400).json({ ok: false, error: 'dramaId is required' });
         return;
       }
       const updated = await updateFavoriteFolderInDb(userId, dramaId, provider, folderId);

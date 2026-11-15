@@ -16,6 +16,8 @@ import {
   Loader2,
   AlertCircle,
   RotateCcw,
+  RotateCw,
+  Bookmark,
   Lock,
   LockOpen,
   Smartphone,
@@ -44,6 +46,10 @@ import {
   isStreamCached,
   prefetchStreamUrl,
 } from '../services/dramaProviders';
+import {
+  fetchLk21EpisodesAsEpisodeItems,
+  fetchLk21Stream,
+} from '../services/movieService';
 import {
   cacheEpisodeForOffline,
   isEpisodeCachedOffline,
@@ -219,6 +225,8 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     visitorId,
     isDramaLiked,
     toggleLikeDrama,
+    isDramaSaved,
+    toggleMyList,
     getWatchedEpisodes,
     subtitleStyle,
     setSubtitleStyle,
@@ -234,6 +242,7 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
   const videoStageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const scrubTrackRef = useRef<HTMLDivElement>(null);
 
   const [streamData, setStreamData] = useState<StreamSource | null>(null);
   const [selectedUrl, setSelectedUrl] = useState<string>('');
@@ -264,11 +273,17 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [bufferedPct, setBufferedPct] = useState(0);
+  const [scrubHover, setScrubHover] = useState<{ pct: number; time: number } | null>(null);
   const [volume, setVolume] = useState(0.9);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(1);
   const [autoPlayNext, setAutoPlayNext] = useState(true);
-  const [theaterAspect, setTheaterAspect] = useState<'9:16' | '16:9'>('9:16');
+  const [theaterAspect, setTheaterAspect] = useState<'9:16' | '16:9'>(() =>
+    drama?.provider === 'LK21' || drama?.mediaType === 'movie' ? '16:9' : '9:16'
+  );
+  const [videoFitMode, setVideoFitMode] = useState<'fit' | 'fill'>('fit');
+  const [pinchFeedback, setPinchFeedback] = useState<string | null>(null);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPipActive, setIsPipActive] = useState(false);
@@ -329,10 +344,15 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     return () => window.clearInterval(interval);
   }, [drama?.bookId, drama?.provider]);
 
-  // Touch, pointer & double-tap gesture refs
+  // Touch, pointer, pinch-to-zoom & double-tap gesture refs
   const lastTapRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
   const singleTapTimerRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
+  const pinchActiveRef = useRef<boolean>(false);
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchTriggeredRef = useRef<'out' | 'in' | null>(null);
+  const lastPinchEndedAtRef = useRef<number>(0);
+  const pinchFeedbackTimerRef = useRef<number | null>(null);
   const controlsVisibleRef = useRef<boolean>(controlsVisible);
   const openMenuRef = useRef<typeof openMenu>(openMenu);
   const lastControlsOpenedAtRef = useRef<number>(0);
@@ -349,9 +369,27 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
   }, [openMenu]);
 
   useEffect(() => {
+    if (!drama) return;
+    const movieMode = drama.provider === 'LK21' || drama.mediaType === 'movie';
+    setTheaterAspect(movieMode ? '16:9' : '9:16');
+    setVideoFitMode('fit');
+    setBufferedPct(0);
+    setScrubHover(null);
+  }, [drama?.bookId, drama?.provider, drama?.mediaType]);
+
+  useEffect(() => {
     return () => {
       if (singleTapTimerRef.current) {
         window.clearTimeout(singleTapTimerRef.current);
+      }
+      if (pinchFeedbackTimerRef.current) {
+        window.clearTimeout(pinchFeedbackTimerRef.current);
+      }
+      try {
+        const ori = screen?.orientation as { unlock?: () => void } | undefined;
+        ori?.unlock?.();
+      } catch {
+        // Ignore on unsupported browsers
       }
     };
   }, []);
@@ -440,13 +478,19 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     setDrawerBatchIdx(idx);
   }, [episodeNumber, showEpisodeDrawer]);
 
-  // Listen to fullscreen state changes
+  // Listen to fullscreen state changes & sync mobile landscape orientation
   useEffect(() => {
     const syncFs = () => {
       const doc = document as Document & {
         webkitFullscreenElement?: Element | null;
       };
-      setIsFullscreen(Boolean(doc.fullscreenElement || doc.webkitFullscreenElement));
+      const fsActive = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+      setIsFullscreen(fsActive);
+      if (fsActive) {
+        tryLockLandscape();
+      } else {
+        unlockOrientation();
+      }
     };
     document.addEventListener('fullscreenchange', syncFs);
     document.addEventListener('webkitfullscreenchange', syncFs);
@@ -537,7 +581,10 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     if (!drama || typeof window === 'undefined') return;
     syncEpisodePlayerSeo(drama, episodeNumber, episodeItems);
     const params = new URLSearchParams(window.location.search);
-    if (!window.location.pathname.startsWith('/drama/')) {
+    if (
+      !window.location.pathname.startsWith('/drama/') &&
+      !window.location.pathname.startsWith('/movie/')
+    ) {
       params.set('drama', drama.bookId);
       params.set('provider', drama.provider);
     }
@@ -591,9 +638,11 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
   useEffect(() => {
     if (!drama || episodes.length > 0) return;
     let cancelled = false;
-    const adapter = getProviderAdapter(drama.provider);
-    adapter
-      .fetchAllEpisodes(drama.bookId)
+    const loader =
+      drama.provider === 'LK21' || drama.mediaType === 'movie'
+        ? fetchLk21EpisodesAsEpisodeItems(drama.bookId)
+        : getProviderAdapter(drama.provider).fetchAllEpisodes(drama.bookId);
+    loader
       .then((list) => {
         if (!cancelled && list.length > 0) {
           onEpisodesLoaded(list);
@@ -724,7 +773,8 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     ep: number,
     provider: DramaItem['provider']
   ) => {
-    const cachedAlready = isStreamCached(bookId, ep, provider);
+    const cachedAlready =
+      provider !== 'LK21' && isStreamCached(bookId, ep, provider);
     if (!cachedAlready) {
       setLoadingStream(true);
     }
@@ -751,10 +801,13 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
 
     try {
       const epMeta = episodeItems.find((item) => item.episodeNumber === ep);
-      const data = await getStreamUrl(bookId, ep, provider, {
-        eid: epMeta?.eid,
-        chapterId: epMeta?.chapterId,
-      });
+      const data =
+        provider === 'LK21'
+          ? await fetchLk21Stream(bookId, ep, epMeta?.eid)
+          : await getStreamUrl(bookId, ep, provider, {
+              eid: epMeta?.eid,
+              chapterId: epMeta?.chapterId,
+            });
       setStreamData(data);
       void cacheEpisodeForOffline({
         bookId,
@@ -1115,10 +1168,16 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
       const nextEpMeta = episodeItems.find(
         (item) => item.episodeNumber === episodeNumber + 1
       );
-      prefetchStreamUrl(drama.bookId, episodeNumber + 1, drama.provider, {
-        eid: nextEpMeta?.eid,
-        chapterId: nextEpMeta?.chapterId,
-      });
+      if (drama.provider === 'LK21') {
+        void fetchLk21Stream(drama.bookId, episodeNumber + 1, nextEpMeta?.eid).catch(
+          () => {}
+        );
+      } else {
+        prefetchStreamUrl(drama.bookId, episodeNumber + 1, drama.provider, {
+          eid: nextEpMeta?.eid,
+          chapterId: nextEpMeta?.chapterId,
+        });
+      }
       setNextPrefetched(true);
     }
   }, [drama, episodeNumber, currentTime, duration, hasNext, episodeItems]);
@@ -1157,6 +1216,41 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     onChangeEpisode(targetEp);
   };
 
+  const tryLockLandscape = () => {
+    try {
+      const isMobileOrTouch =
+        typeof window !== 'undefined' &&
+        (window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 1024);
+      if (!isMobileOrTouch) return;
+      const ori = screen?.orientation as
+        | { lock?: (orientation: string) => Promise<void> }
+        | undefined;
+      void ori?.lock?.('landscape').catch(() => {});
+    } catch {
+      // Orientation lock unsupported
+    }
+  };
+
+  const unlockOrientation = () => {
+    try {
+      const ori = screen?.orientation as { unlock?: () => void } | undefined;
+      ori?.unlock?.();
+    } catch {
+      // Orientation unlock unsupported
+    }
+  };
+
+  const showPinchToast = (message: string) => {
+    if (pinchFeedbackTimerRef.current) {
+      window.clearTimeout(pinchFeedbackTimerRef.current);
+    }
+    setPinchFeedback(message);
+    pinchFeedbackTimerRef.current = window.setTimeout(() => {
+      setPinchFeedback(null);
+      pinchFeedbackTimerRef.current = null;
+    }, 1200);
+  };
+
   const handleClosePlayer = () => {
     flushProgress(undefined, true);
     const v = videoRef.current;
@@ -1164,6 +1258,7 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
       v.pause();
       setIsPlaying(false);
     }
+    unlockOrientation();
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
@@ -1189,7 +1284,7 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     }
   };
 
-  const handleFullscreen = async () => {
+  const enterFullscreenMode = async () => {
     const el = containerRef.current as
       | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
       | null;
@@ -1197,40 +1292,69 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
       | (HTMLVideoElement & { webkitEnterFullscreen?: () => void })
       | null;
     if (!el) return;
-
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+    };
+    if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+      setIsFullscreen(true);
+      tryLockLandscape();
+      return;
+    }
     try {
-      const doc = document as Document & {
-        webkitFullscreenElement?: Element | null;
-        webkitExitFullscreen?: () => Promise<void>;
-      };
-
-      if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
-        if (el.requestFullscreen) {
-          await el.requestFullscreen();
-        } else if (el.webkitRequestFullscreen) {
-          await el.webkitRequestFullscreen();
-        } else if (video?.webkitEnterFullscreen) {
-          video.webkitEnterFullscreen();
-        }
-        setIsFullscreen(true);
-      } else {
-        if (doc.exitFullscreen) {
-          await doc.exitFullscreen();
-        } else if (doc.webkitExitFullscreen) {
-          await doc.webkitExitFullscreen();
-        }
-        setIsFullscreen(false);
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen();
+      } else if (video?.webkitEnterFullscreen) {
+        video.webkitEnterFullscreen();
       }
+      setIsFullscreen(true);
+      tryLockLandscape();
     } catch {
       if (video?.webkitEnterFullscreen) {
         try {
           video.webkitEnterFullscreen();
+          setIsFullscreen(true);
+          tryLockLandscape();
         } catch {
-          setIsFullscreen((prev) => !prev);
+          setIsFullscreen(true);
         }
       } else {
-        setIsFullscreen((prev) => !prev);
+        setIsFullscreen(true);
       }
+    }
+  };
+
+  const exitFullscreenMode = async () => {
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => Promise<void>;
+    };
+    unlockOrientation();
+    if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
+      setIsFullscreen(false);
+      return;
+    }
+    try {
+      if (doc.exitFullscreen) {
+        await doc.exitFullscreen();
+      } else if (doc.webkitExitFullscreen) {
+        await doc.webkitExitFullscreen();
+      }
+      setIsFullscreen(false);
+    } catch {
+      setIsFullscreen(false);
+    }
+  };
+
+  const handleFullscreen = async () => {
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+    };
+    if (!doc.fullscreenElement && !doc.webkitFullscreenElement && !isFullscreen) {
+      await enterFullscreenMode();
+    } else {
+      await exitFullscreenMode();
     }
   };
 
@@ -1296,6 +1420,10 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
       return;
     }
 
+    if (pinchActiveRef.current || Date.now() - lastPinchEndedAtRef.current < 450) {
+      return;
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / Math.max(1, rect.width);
     const now = Date.now();
@@ -1347,6 +1475,9 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
 
     singleTapTimerRef.current = window.setTimeout(() => {
       singleTapTimerRef.current = null;
+      if (pinchActiveRef.current || Date.now() - lastPinchEndedAtRef.current < 450) {
+        return;
+      }
       if (openMenuRef.current !== null) {
         setOpenMenu(null);
         bumpHudActivity();
@@ -1359,12 +1490,68 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
     }, 240);
   };
 
+  const getTouchDistance = (touches: React.TouchList): number => {
+    if (touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    touchStartYRef.current = e.touches[0]?.clientY ?? null;
+    if (e.touches.length === 2) {
+      if (singleTapTimerRef.current) {
+        window.clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
+      pinchActiveRef.current = true;
+      pinchStartDistRef.current = getTouchDistance(e.touches);
+      pinchTriggeredRef.current = null;
+      touchStartYRef.current = null;
+      return;
+    }
+    if (e.touches.length === 1 && !pinchActiveRef.current) {
+      touchStartYRef.current = e.touches[0]?.clientY ?? null;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 2 || !pinchStartDistRef.current) return;
+    pinchActiveRef.current = true;
+    const currentDist = getTouchDistance(e.touches);
+    const startDist = Math.max(1, pinchStartDistRef.current);
+    const ratio = currentDist / startDist;
+    const delta = currentDist - startDist;
+
+    if ((ratio >= 1.22 || delta >= 34) && pinchTriggeredRef.current !== 'out') {
+      pinchTriggeredRef.current = 'out';
+      setVideoFitMode('fill');
+      showPinchToast(`${t.player.fullscreen} · ${t.player.zoomFill}`);
+      bumpHudActivity();
+      void enterFullscreenMode();
+    } else if (
+      (ratio <= 0.8 || delta <= -34) &&
+      pinchTriggeredRef.current !== 'in'
+    ) {
+      pinchTriggeredRef.current = 'in';
+      setVideoFitMode('fit');
+      showPinchToast(t.player.zoomFit);
+      bumpHudActivity();
+      void exitFullscreenMode();
+    }
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     lastTouchEndAtRef.current = Date.now();
+    if (pinchActiveRef.current) {
+      lastPinchEndedAtRef.current = Date.now();
+      touchStartYRef.current = null;
+      if (e.touches.length === 0) {
+        pinchActiveRef.current = false;
+        pinchStartDistRef.current = null;
+        pinchTriggeredRef.current = null;
+      }
+      return;
+    }
     if (touchStartYRef.current === null) return;
     const endY = e.changedTouches[0]?.clientY ?? touchStartYRef.current;
     const deltaY = endY - touchStartYRef.current;
@@ -1561,7 +1748,9 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
 
   if (!drama) return null;
 
+  const isMovie = drama.provider === 'LK21' || drama.mediaType === 'movie';
   const isLiked = isDramaLiked(drama.bookId, drama.provider);
+  const isSaved = isDramaSaved(drama.bookId, drama.provider);
   const progressPct =
     duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
   const showSkipIntro =
@@ -1638,6 +1827,8 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
         className={
           isFullscreen
             ? 'relative flex-1 flex flex-col justify-between bg-black overflow-hidden'
+            : isTheaterMode
+            ? 'relative h-[88dvh] sm:h-[92dvh] min-h-[460px] w-full flex flex-col justify-between bg-black overflow-hidden shrink-0'
             : 'relative h-[86dvh] sm:h-[88dvh] min-h-[440px] w-full flex flex-col justify-between bg-black overflow-hidden shrink-0'
         }
       >
@@ -1822,6 +2013,40 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
             onClick={(e) => {
               e.stopPropagation();
               bumpHudActivity();
+              toggleMyList(drama);
+            }}
+            aria-label={
+              isMovie
+                ? isSaved
+                  ? t.player.savedMovie
+                  : t.player.saveMovie
+                : isSaved
+                ? t.player.savedDrama
+                : t.player.saveDrama
+            }
+            className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-xs font-medium whitespace-nowrap transition-colors ${
+              isSaved
+                ? 'bg-[#E50914]/20 border-[#E50914] text-red-200'
+                : 'bg-[#141418]/90 border-white/10 text-white hover:border-[#E50914]/70'
+            }`}
+          >
+            <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'fill-current text-[#E50914]' : ''}`} />
+            <span>
+              {isMovie
+                ? isSaved
+                  ? t.player.savedMovie
+                  : t.player.saveMovie
+                : isSaved
+                ? t.player.savedDrama
+                : t.player.saveDrama}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              bumpHudActivity();
               toggleLikeDrama(drama);
             }}
             aria-label={isLiked ? t.player.liked : t.player.like}
@@ -1894,11 +2119,12 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
 
       {/* Main Theater Viewport: True 100dvh Edge-to-Edge on Mobile, Centered Theater with Ambient Glow (Dimmed in Theater Mode) */}
       <div
-        className={`relative flex-1 flex items-center justify-center overflow-hidden transition-colors duration-300 ${
-          isTheaterMode ? 'p-0 bg-black' : 'p-0 sm:px-4'
+        className={`relative flex-1 flex items-center justify-center overflow-hidden touch-none transition-colors duration-300 ${
+          isTheaterMode || isFullscreen ? 'p-0 bg-black' : 'p-0 sm:px-4'
         }`}
         onClick={handleViewportClick}
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
         {/* Cinema Ambient Glow Backdrop (Desktop — dims out completely in Theater Mode) */}
@@ -1996,11 +2222,13 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                     ? 'w-[148px] sm:w-[205px] aspect-[9/16] max-h-[44dvh]'
                     : 'w-[240px] sm:w-[340px] aspect-video'
                 } rounded-2xl border border-white/25 bg-black shadow-[0_20px_50px_rgba(0,0,0,0.85)] overflow-hidden transition-all duration-300 group`
-              : `relative overflow-hidden bg-black sm:shadow-2xl transition-all duration-300 ${
-                  isTheaterMode
+              : `relative overflow-hidden bg-black touch-none sm:shadow-2xl transition-all duration-300 ${
+                  isFullscreen
+                    ? 'w-full h-full rounded-none border-0'
+                    : isTheaterMode
                     ? theaterAspect === '9:16'
-                      ? 'w-full h-full sm:w-auto sm:h-[88vh] sm:aspect-[9/16] sm:rounded-xl'
-                      : 'w-full h-full sm:max-w-7xl sm:aspect-video sm:rounded-xl'
+                      ? 'w-full h-full sm:w-auto sm:h-[86vh] sm:aspect-[9/16] sm:rounded-lg'
+                      : 'w-full h-full sm:w-full sm:max-w-[96vw] sm:max-h-[82vh] sm:aspect-video sm:rounded-lg'
                     : theaterAspect === '9:16'
                     ? 'w-full h-full sm:w-auto sm:h-[76vh] sm:aspect-[9/16] sm:rounded-2xl sm:border sm:border-white/15'
                     : 'w-full h-full sm:h-auto sm:max-w-5xl sm:aspect-video sm:rounded-xl sm:border sm:border-white/15'
@@ -2013,6 +2241,14 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
             controlsList="nodownload"
             onContextMenu={(e) => e.preventDefault()}
             poster={drama.cover || undefined}
+            onProgress={() => {
+              const v = videoRef.current;
+              if (!v || !Number.isFinite(v.duration) || v.duration <= 0) return;
+              if (v.buffered.length > 0) {
+                const end = v.buffered.end(v.buffered.length - 1);
+                setBufferedPct(Math.min(100, Math.max(0, (end / v.duration) * 100)));
+              }
+            }}
             onTimeUpdate={() => {
               const v = videoRef.current;
               if (!v) return;
@@ -2069,7 +2305,9 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                 }
               }
             }}
-            className="w-full h-full object-contain bg-black"
+            className={`w-full h-full bg-black transition-all duration-300 ${
+              videoFitMode === 'fill' ? 'object-cover' : 'object-contain'
+            }`}
           />
 
           {/* Dynamic Moving Translucent Watermark Overlay (Stream Security — hidden in compact corner mini-player) */}
@@ -2219,6 +2457,16 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
             ))}
           </div>
 
+          {/* Pinch-to-Zoom Feedback Pill */}
+          {pinchFeedback && !isFloatingMiniActive && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+              <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-white/20 text-xs font-bold text-white shadow-xl">
+                <Maximize2 className="w-3.5 h-3.5 text-[#E50914]" />
+                {pinchFeedback}
+              </span>
+            </div>
+          )}
+
           {/* Double-Tap Visual Ripple Feedback */}
           {seekFeedback && (
             <div
@@ -2274,13 +2522,29 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
             </div>
           )}
 
-          {/* Center Play/Pause Overlay Button (Shown when HUD visible or paused — hidden in mini-player) */}
+          {/* Netflix-Style Center Overlay Transport Controls: Rewind 10s, Play/Pause, Forward 10s */}
           {!isFloatingMiniActive &&
             !loadingStream &&
             !streamError &&
             selectedUrl &&
             hudVisible && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+            <div className="absolute inset-0 flex items-center justify-center gap-6 sm:gap-10 pointer-events-none z-20">
+              <button
+                type="button"
+                data-hud-control="true"
+                {...hudButtonTouchProps}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerSeekDelta(-10);
+                }}
+                aria-label={t.player.rewind10s}
+                title={t.player.rewind10s}
+                className="pointer-events-auto flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-black/55 backdrop-blur-md border border-white/20 text-white hover:bg-white/20 hover:scale-105 active:scale-95 transition-all"
+              >
+                <RotateCcw className="w-5 h-5" />
+                <span className="text-[9px] font-bold leading-none mt-0.5 tabular-nums">10</span>
+              </button>
+
               <button
                 type="button"
                 data-hud-control="true"
@@ -2291,13 +2555,29 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                   togglePlay();
                 }}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
-                className="pointer-events-auto w-16 h-16 rounded-full bg-black/55 backdrop-blur-md border border-white/25 text-white flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-transform"
+                className="pointer-events-auto w-16 h-16 sm:w-[70px] sm:h-[70px] rounded-full bg-black/65 backdrop-blur-md border border-white/30 text-white flex items-center justify-center shadow-2xl hover:bg-[#E50914] hover:border-[#E50914] hover:scale-105 active:scale-95 transition-all"
               >
                 {isPlaying ? (
-                  <Pause className="w-7 h-7 fill-current" />
+                  <Pause className="w-7 h-7 sm:w-8 sm:h-8 fill-current" />
                 ) : (
-                  <Play className="w-7 h-7 fill-current ml-1" />
+                  <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-current ml-1" />
                 )}
+              </button>
+
+              <button
+                type="button"
+                data-hud-control="true"
+                {...hudButtonTouchProps}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerSeekDelta(10);
+                }}
+                aria-label={t.player.forward10s}
+                title={t.player.forward10s}
+                className="pointer-events-auto flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-black/55 backdrop-blur-md border border-white/20 text-white hover:bg-white/20 hover:scale-105 active:scale-95 transition-all"
+              >
+                <RotateCw className="w-5 h-5" />
+                <span className="text-[9px] font-bold leading-none mt-0.5 tabular-nums">10</span>
               </button>
             </div>
           )}
@@ -2499,6 +2779,45 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
             </div>
             <span className="text-[9px] font-semibold text-white">
               {isLiked ? t.player.liked : t.player.like}
+            </span>
+          </button>
+
+          {/* Watchlist Button (Drama Watchlist + Login-Gated Movie Watchlist) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              bumpHudActivity();
+              toggleMyList(drama);
+            }}
+            aria-label={
+              isMovie
+                ? isSaved
+                  ? t.player.savedMovie
+                  : t.player.saveMovie
+                : isSaved
+                ? t.player.savedDrama
+                : t.player.saveDrama
+            }
+            className="flex flex-col items-center gap-0.5 min-w-[40px]"
+          >
+            <div
+              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
+                isSaved
+                  ? 'bg-[#E50914] border-[#E50914] text-white'
+                  : 'bg-white/10 border-white/15 text-white'
+              }`}
+            >
+              <Bookmark className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
+            </div>
+            <span className="text-[9px] font-semibold text-white">
+              {isMovie
+                ? isSaved
+                  ? t.player.savedMovie
+                  : t.player.saveMovie
+                : isSaved
+                ? t.player.savedDrama
+                : t.player.saveDrama}
             </span>
           </button>
 
@@ -3244,18 +3563,44 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
           hudVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="max-w-5xl mx-auto space-y-2.5">
-          <div className="flex items-center gap-2.5">
-            <span className="text-[11px] text-white tabular-nums w-10 text-right">
+        <div className="max-w-6xl mx-auto space-y-2.5">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-semibold text-white tabular-nums w-11 text-right">
               {formatTime(currentTime)}
             </span>
-            <div className="relative flex-1 h-2 flex items-center">
-              <div className="w-full h-1.5 rounded-full bg-white/25 overflow-hidden">
+            <div
+              ref={scrubTrackRef}
+              onMouseMove={(e) => {
+                if (!duration || duration <= 0) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const pct = Math.min(100, Math.max(0, ((e.clientX - rect.left) / Math.max(1, rect.width)) * 100));
+                setScrubHover({ pct, time: (pct / 100) * duration });
+              }}
+              onMouseLeave={() => setScrubHover(null)}
+              className="group/scrub relative flex-1 h-4 flex items-center cursor-pointer"
+            >
+              {scrubHover && (
                 <div
-                  className="h-full cd-accent-bg rounded-full"
+                  className="pointer-events-none absolute -top-8 -translate-x-1/2 px-2 py-0.5 rounded bg-black/90 border border-white/20 text-[10px] font-bold text-white tabular-nums shadow-lg whitespace-nowrap"
+                  style={{ left: `${scrubHover.pct}%` }}
+                >
+                  {formatTime(scrubHover.time)}
+                </div>
+              )}
+              <div className="relative w-full h-1 group-hover/scrub:h-2 rounded-full bg-white/25 overflow-hidden transition-all">
+                <div
+                  className="absolute inset-y-0 left-0 bg-white/35 rounded-full"
+                  style={{ width: `${bufferedPct}%` }}
+                />
+                <div
+                  className="relative h-full bg-[#E50914] rounded-full"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
+              <div
+                className="pointer-events-none absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-[#E50914] border border-white shadow-md scale-90 group-hover/scrub:scale-110 transition-transform"
+                style={{ left: `${progressPct}%` }}
+              />
               <input
                 type="range"
                 min={0}
@@ -3271,23 +3616,27 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                   const val = Number(e.target.value);
                   setCurrentTime(val);
                   if (videoRef.current) videoRef.current.currentTime = val;
+                  if (duration > 0) {
+                    setScrubHover({ pct: Math.min(100, (val / duration) * 100), time: val });
+                  }
                   bumpHudActivity();
                 }}
+                onPointerUp={() => setScrubHover(null)}
                 aria-label="Video playback progress"
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
             </div>
-            <span className="text-[11px] text-[#A1A1AA] tabular-nums w-10">
+            <span className="text-[11px] text-[#A1A1AA] tabular-nums w-11">
               {formatTime(duration)}
             </span>
           </div>
 
           <p className="sm:hidden text-[10px] text-center text-[#A1A1AA]/85">
-            {t.player.swipeHint}
+            {isMovie ? t.player.pinchHint : `${t.player.swipeHint} · ${t.player.pinchHint}`}
           </p>
 
           <div className="hidden sm:flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={(e) => {
@@ -3296,13 +3645,41 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                   togglePlay();
                 }}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
-                className="p-2.5 rounded-full cd-accent-bg text-white"
+                className="p-2.5 rounded-full bg-[#E50914] hover:bg-[#f40612] text-white shadow-lg transition-colors"
               >
                 {isPlaying ? (
                   <Pause className="w-4 h-4 fill-current" />
                 ) : (
                   <Play className="w-4 h-4 fill-current" />
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerSeekDelta(-10);
+                }}
+                aria-label={t.player.rewind10s}
+                title={t.player.rewind10s}
+                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg hover:bg-white/10 text-xs font-semibold text-white transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span className="tabular-nums">-10s</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerSeekDelta(10);
+                }}
+                aria-label={t.player.forward10s}
+                title={t.player.forward10s}
+                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg hover:bg-white/10 text-xs font-semibold text-white transition-colors"
+              >
+                <RotateCw className="w-4 h-4" />
+                <span className="tabular-nums">+10s</span>
               </button>
 
               {hasPrev && (
@@ -3370,7 +3747,7 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                     bumpHudActivity();
                   }}
                   aria-label="Volume"
-                  className="w-20 accent-[var(--cd-accent)] cursor-pointer"
+                  className="w-20 accent-[#E50914] cursor-pointer"
                 />
               </div>
             </div>
@@ -3558,11 +3935,45 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   bumpHudActivity();
+                  setVideoFitMode((prev) => (prev === 'fit' ? 'fill' : 'fit'));
+                }}
+                aria-label={videoFitMode === 'fill' ? t.player.zoomFit : t.player.zoomFill}
+                title={videoFitMode === 'fill' ? t.player.zoomFit : t.player.zoomFill}
+                className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-white/10 text-xs font-medium transition-colors ${
+                  videoFitMode === 'fill' ? 'cd-accent-text' : 'text-white'
+                }`}
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>{videoFitMode === 'fill' ? 'Fill' : 'Fit'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  bumpHudActivity();
+                  setIsTheaterMode((prev) => !prev);
+                }}
+                aria-label={isTheaterMode ? t.player.exitTheaterMode : t.player.theaterMode}
+                title={isTheaterMode ? t.player.exitTheaterMode : t.player.theaterMode}
+                className={`p-2 rounded-lg hover:bg-white/10 transition-colors ${
+                  isTheaterMode ? 'cd-accent-text' : 'text-white'
+                }`}
+              >
+                <Tv className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  bumpHudActivity();
                   void handleFullscreen();
                 }}
                 aria-label={
                   isFullscreen ? t.player.exitFullscreen : t.player.fullscreen
                 }
+                title={isFullscreen ? t.player.exitFullscreen : t.player.fullscreen}
                 className="p-2 rounded-lg hover:bg-white/10 text-white"
               >
                 {isFullscreen ? (
@@ -3609,6 +4020,26 @@ export const CinemaVideoPlayer: React.FC<CinemaVideoPlayerProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => toggleMyList(drama)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-xs font-semibold transition-colors ${
+                    isSaved
+                      ? 'bg-[#E50914]/20 border-[#E50914] text-red-200'
+                      : 'bg-[#18181F] border-white/10 text-white hover:border-[#E50914]/70'
+                  }`}
+                >
+                  <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'fill-current text-[#E50914]' : ''}`} />
+                  <span>
+                    {isMovie
+                      ? isSaved
+                        ? t.player.savedMovie
+                        : t.player.saveMovie
+                      : isSaved
+                      ? t.player.savedDrama
+                      : t.player.saveDrama}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => toggleLikeDrama(drama)}

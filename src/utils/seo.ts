@@ -2,8 +2,8 @@ import type {
   DramaItem,
   EpisodeItem,
   LanguageCode,
+  MediaProviderName,
   NavTab,
-  ProviderName,
 } from '../types/drama';
 import type { ProgrammaticLandingConfig } from './programmaticSeo';
 
@@ -23,12 +23,15 @@ export function slugifyDramaTitle(title: string): string {
 export function getDramaPath(
   bookId: string,
   title?: string,
-  _provider: ProviderName = 'DramaBox',
+  provider: MediaProviderName = 'DramaBox',
   slug?: string
 ): string {
   const cleanSlug =
     (slug || '').trim() ||
     (title ? slugifyDramaTitle(title) : encodeURIComponent(bookId));
+  if (provider === 'LK21') {
+    return `/movie/${encodeURIComponent(cleanSlug)}`;
+  }
   return `/drama/${encodeURIComponent(cleanSlug)}`;
 }
 
@@ -115,12 +118,14 @@ export function buildDramaJsonLd(
   const logoImage = `${cleanOrigin}/assets/aistudio/logo_dan_pavicon_f5e028e6.png`;
   const epWatchUrl = episodeNumber > 1 ? `${dramaUrl}?ep=${episodeNumber}` : dramaUrl;
 
+  const isMovie = drama.mediaType === 'movie' || drama.provider === 'LK21';
+
   return {
     '@context': 'https://schema.org',
     '@graph': [
       {
-        '@type': 'TVSeries',
-        '@id': `${dramaUrl}#tvseries`,
+        '@type': isMovie ? 'Movie' : 'TVSeries',
+        '@id': `${dramaUrl}#${isMovie ? 'movie' : 'tvseries'}`,
         name: drama.title,
         description: drama.description,
         image: coverImage,
@@ -277,6 +282,12 @@ export function syncSectionDocumentSeo(section: NavTab) {
     Exclude<NavTab, 'home'>,
     { path: string; title: string; description: string }
   > = {
+    movies: {
+      path: '/movies',
+      title: 'Watch Free HD Movies Online — Box Office, Asian Cinema & Series | House Drama',
+      description:
+        'Stream thousands of full HD feature films, Asian cinema, Korean movies, Hollywood hits, and latest releases free online at House Drama Movies.',
+    },
     explore: {
       path: '/explore',
       title: 'Explore All Vertical Short Dramas by Genre & Filter | House Drama',
@@ -313,8 +324,8 @@ export function syncSectionDocumentSeo(section: NavTab) {
     },
     mylist: {
       path: '/watchlist',
-      title: 'My Watchlist & Saved Short Dramas | House Drama',
-      description: 'Manage your saved drama folders, watching status, and completed mini-series.',
+      title: 'My Movie Watchlist & Saved Films | House Drama',
+      description: 'Manage your saved feature films, movie folders, watching status, and completed movies.',
     },
     dashboard: {
       path: '/dashboard',
