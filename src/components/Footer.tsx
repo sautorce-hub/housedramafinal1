@@ -55,6 +55,17 @@ function getVisitorId(): string {
   }
 }
 
+const COLLECTION_LINKS = [
+  { path: '/genre/ceo-romance', label: 'CEO Romance' },
+  { path: '/genre/billionaire-revenge', label: 'Billionaire Revenge' },
+  { path: '/genre/hidden-identity-ceo', label: 'Hidden Identity' },
+  { path: '/genre/flash-marriage-romance', label: 'Flash Marriage' },
+  { path: '/genre/completed-ceo-romance', label: 'Completed Series' },
+  { path: '/genre/rebirth-revenge', label: 'Rebirth & Vengeance' },
+  { path: '/genre/royal-palace-drama', label: 'Royal Palace' },
+  { path: '/genre/best-vertical-short-dramas', label: 'Top Short Dramas' },
+];
+
 export const Footer: React.FC = () => {
   const { t, pushToast, setHelpModalOpen } = useDramaContext();
   const [activeModal, setActiveModal] = useState<LegalModalTopic | null>(null);
@@ -147,23 +158,56 @@ export const Footer: React.FC = () => {
 
   return (
     <>
-      <footer className="border-t border-white/10 bg-[#090706] pt-10 pb-24 md:pb-10">
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-8 space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-            {/* Brand + Tagline */}
-            <div className="md:col-span-4 space-y-3">
+      <footer className="border-t border-white/[0.08] bg-[#090706] pt-12 sm:pt-14 pb-[calc(6.75rem+env(safe-area-inset-bottom))] md:pb-12">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-8 lg:gap-8">
+            {/* Brand + Editorial Statement */}
+            <div className="sm:col-span-2 lg:col-span-3 space-y-3.5">
               <CoffeeDramaLogo />
-              <p className="text-xs text-[#A1A1AA] leading-relaxed max-w-sm">
+              <p className="text-xs sm:text-[13px] text-[#8E8E93] leading-relaxed max-w-xs">
                 {t.footer.tagline}
               </p>
             </div>
 
-            {/* Legal & Informational Links */}
-            <div className="md:col-span-4 space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+            {/* Curated Collections */}
+            <nav
+              aria-label={t.footer.collectionsTitle}
+              className="lg:col-span-3 space-y-3"
+            >
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#D4D4D8]">
+                {t.footer.collectionsTitle}
+              </h3>
+              <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                {COLLECTION_LINKS.map((link) => (
+                  <li key={link.path}>
+                    <a
+                      href={link.path}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.dispatchEvent(
+                          new CustomEvent('hd:navigate-path', {
+                            detail: { path: link.path },
+                          })
+                        );
+                      }}
+                      className="inline-flex items-center min-h-[36px] text-xs text-[#8E8E93] hover:text-white transition-colors"
+                    >
+                      {link.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+
+            {/* Legal & Information */}
+            <nav
+              aria-label={t.footer.linksTitle}
+              className="lg:col-span-2 space-y-3"
+            >
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#D4D4D8]">
                 {t.footer.linksTitle}
               </h3>
-              <ul className="grid grid-cols-2 gap-y-2 gap-x-4">
+              <ul className="grid grid-cols-2 lg:grid-cols-1 gap-x-4 gap-y-0.5">
                 {legalLinks.map((item) => (
                   <li key={item.topic}>
                     <button
@@ -172,7 +216,7 @@ export const Footer: React.FC = () => {
                         setContactSent(false);
                         setActiveModal(item.topic);
                       }}
-                      className="text-xs text-[#A1A1AA] hover:text-[#EF4444] transition-colors text-left"
+                      className="inline-flex items-center min-h-[36px] text-xs text-[#8E8E93] hover:text-white transition-colors text-left"
                     >
                       {item.label}
                     </button>
@@ -182,24 +226,24 @@ export const Footer: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setHelpModalOpen(true)}
-                    className="text-xs text-[#D4AF37] hover:text-white transition-colors text-left font-medium"
+                    className="inline-flex items-center min-h-[36px] text-xs text-[#A1A1AA] hover:text-white transition-colors text-left"
                   >
                     {t.footer.helpCenter}
                   </button>
                 </li>
               </ul>
-            </div>
+            </nav>
 
-            {/* Live Visitor Counter Widget */}
-            <div className="md:col-span-4">
-              <div className="rounded-2xl bg-[#12100F] border border-white/10 p-4 space-y-3">
+            {/* Audience Reach Widget (Restored Subtle Card + Thin Hairline Aesthetic) */}
+            <div className="sm:col-span-2 lg:col-span-4 space-y-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#D4D4D8]">
+                {t.footer.communityTitle}
+              </h3>
+              <div className="rounded-2xl bg-[#12100F] border border-white/[0.08] p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                    </span>
-                    <span className="text-xs font-semibold text-white">
+                    <span className="inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    <span className="text-xs font-medium text-[#E4E4E7]">
                       {t.footer.onlineNow}
                     </span>
                   </div>
@@ -208,33 +252,33 @@ export const Footer: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/10">
-                  <div className="rounded-xl bg-[#1A1512]/80 border border-white/5 px-2.5 py-2">
-                    <div className="flex items-center gap-1 text-[10px] text-[#A1A1AA] truncate">
+                <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/[0.08]">
+                  <div className="rounded-xl bg-[#1A1512]/70 border border-white/[0.05] px-2.5 py-2">
+                    <div className="flex items-center gap-1 text-[10px] text-[#8E8E93] truncate">
                       <Users className="w-3 h-3 text-[#D4AF37] shrink-0" />
                       <span className="truncate">{t.footer.todayVisitors}</span>
                     </div>
-                    <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
+                    <p className="text-sm font-semibold text-white mt-0.5 tabular-nums">
                       {stats.todayVisitors.toLocaleString()}
                     </p>
                   </div>
 
-                  <div className="rounded-xl bg-[#1A1512]/80 border border-white/5 px-2.5 py-2">
-                    <div className="flex items-center gap-1 text-[10px] text-[#A1A1AA] truncate">
+                  <div className="rounded-xl bg-[#1A1512]/70 border border-white/[0.05] px-2.5 py-2">
+                    <div className="flex items-center gap-1 text-[10px] text-[#8E8E93] truncate">
                       <Users className="w-3 h-3 text-emerald-400 shrink-0" />
                       <span className="truncate">{t.footer.totalVisitors}</span>
                     </div>
-                    <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
+                    <p className="text-sm font-semibold text-white mt-0.5 tabular-nums">
                       {stats.totalVisitors.toLocaleString()}
                     </p>
                   </div>
 
-                  <div className="rounded-xl bg-[#1A1512]/80 border border-white/5 px-2.5 py-2">
-                    <div className="flex items-center gap-1 text-[10px] text-[#A1A1AA] truncate">
+                  <div className="rounded-xl bg-[#1A1512]/70 border border-white/[0.05] px-2.5 py-2">
+                    <div className="flex items-center gap-1 text-[10px] text-[#8E8E93] truncate">
                       <Eye className="w-3 h-3 text-[#EF4444] shrink-0" />
                       <span className="truncate">{t.footer.totalViews}</span>
                     </div>
-                    <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
+                    <p className="text-sm font-semibold text-white mt-0.5 tabular-nums">
                       {stats.totalViews.toLocaleString()}
                     </p>
                   </div>
@@ -243,44 +287,10 @@ export const Footer: React.FC = () => {
             </div>
           </div>
 
-          {/* Programmatic SEO Internal Crawl Links */}
-          <div className="pt-5 border-t border-white/10 space-y-2.5">
-            <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#D4AF37]">
-              Explore Popular Genres &amp; Collections
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { path: '/genre/ceo-romance', label: 'CEO Romance' },
-                { path: '/genre/billionaire-revenge', label: 'Billionaire Revenge' },
-                { path: '/genre/hidden-identity-ceo', label: 'Hidden Identity CEO' },
-                { path: '/genre/flash-marriage-romance', label: 'Flash Marriage' },
-                { path: '/genre/completed-ceo-romance', label: 'Completed Series' },
-                { path: '/genre/rebirth-revenge', label: 'Rebirth & Vengeance' },
-                { path: '/genre/royal-palace-drama', label: 'Royal Palace' },
-                { path: '/genre/best-vertical-short-dramas', label: 'Best Short Dramas' },
-              ].map((link) => (
-                <a
-                  key={link.path}
-                  href={link.path}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    window.dispatchEvent(
-                      new CustomEvent('hd:navigate-path', {
-                        detail: { path: link.path },
-                      })
-                    );
-                  }}
-                  className="px-3 py-1 rounded-full bg-[#12100F] border border-white/10 hover:border-[#EF4444]/60 text-[11px] text-[#D4D4D8] hover:text-white transition-colors"
-                >
-                  {link.label}
-                </a>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-5 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-[#71717A]">
-            <p>{t.footer.rights}</p>
-            <p>DramaBox V2 · NetShort · PWA Ready</p>
+          <div className="mt-10 pt-6 border-t border-white/[0.06] text-center">
+            <p className="text-xs text-[#71717A] tracking-wide leading-relaxed">
+              {t.footer.rights}
+            </p>
           </div>
         </div>
       </footer>

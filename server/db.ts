@@ -1,4 +1,4 @@
-import { Pool, type PoolConfig, type QueryResult, type QueryResultRow } from 'pg';
+import { Pool, type PoolClient, type PoolConfig, type QueryResult, type QueryResultRow } from 'pg';
 
 let pool: Pool | null = null;
 let schemaReadyPromise: Promise<boolean> | null = null;
@@ -16,10 +16,34 @@ function buildPoolConfig(connectionString: string): PoolConfig {
     max: 10,
     min: 0,
     idleTimeoutMillis: 20_000,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 15_000,
     keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    query_timeout: 20_000,
+    statement_timeout: 20_000,
     allowExitOnIdle: true,
   };
+}
+
+function isTransientPoolError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const msg =
+    err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  const code = String((err as { code?: unknown }).code || '').toUpperCase();
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EPIPE' ||
+    code === 'ENOTFOUND' ||
+    code === '57P01' ||
+    code === '08006' ||
+    code === '08003' ||
+    msg.includes('connection terminated unexpectedly') ||
+    msg.includes('client has encountered a connection error') ||
+    msg.includes('timeout exceeded when trying to connect') ||
+    msg.includes('connection timeout') ||
+    msg.includes('socket hang up')
+  );
 }
 
 export function getPool(): Pool | null {
@@ -49,7 +73,26 @@ export async function dbQuery<T extends QueryResultRow = QueryResultRow>(
   if (!activePool) return null;
   await ensureDatabaseReady();
   if (!dbAvailable) return null;
-  return activePool.query<T>(sql, params);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await activePool.query<T>(sql, params);
+    } catch (err) {
+      if (attempt === 0 && isTransientPoolError(err)) {
+        await new Promise((r) => setTimeout(r, 140));
+        continue;
+      }
+      if (isTransientPoolError(err)) {
+        dbAvailable = false;
+      }
+      console.warn(
+        '[PostgreSQL] Query error:',
+        err instanceof Error ? err.message : String(err)
+      );
+      return null;
+    }
+  }
+  return null;
 }
 
 const SCHEMA_STATEMENTS: string[] = [
@@ -340,8 +383,9 @@ export async function ensureDatabaseReady(): Promise<boolean> {
   if (schemaReadyPromise) return schemaReadyPromise;
 
   schemaReadyPromise = (async () => {
-    const client = await activePool.connect();
+    let client: PoolClient | null = null;
     try {
+      client = await activePool.connect();
       await client.query('SELECT 1');
       for (const stmt of SCHEMA_STATEMENTS) {
         await client.query(stmt);
@@ -357,7 +401,11 @@ export async function ensureDatabaseReady(): Promise<boolean> {
       );
       return false;
     } finally {
-      client.release();
+      try {
+        client?.release();
+      } catch {
+        // Ignore release error on broken client
+      }
       schemaReadyPromise = null;
     }
   })();
@@ -379,6 +427,7 @@ export async function pingDb(): Promise<{ ok: boolean; latencyMs: number; engine
     await activePool.query('SELECT 1');
     return { ok: true, latencyMs: Date.now() - start, engine: 'postgresql' };
   } catch {
+    dbAvailable = false;
     return { ok: false, latencyMs: Date.now() - start, engine: 'memory' };
   }
 }
@@ -423,76 +472,78 @@ export async function syncUserInDb(input: {
   const today = (input.visitDate || getDateKeyUtc()).slice(0, 10);
   const yesterday = getDateKeyUtc(-1);
 
-  const existingRes = await activePool.query<{
-    streak_count: number;
-    last_visit_date: string;
-  }>('SELECT streak_count, last_visit_date FROM users WHERE uid = $1', [input.uid]);
+  try {
+    const existingRes = await dbQuery<{
+      streak_count: number;
+      last_visit_date: string;
+    }>('SELECT streak_count, last_visit_date FROM users WHERE uid = $1', [input.uid]);
+    if (!existingRes) return null;
 
-  let nextStreak = 1;
-  if (existingRes.rows.length > 0) {
-    const prev = existingRes.rows[0];
-    const prevCount = Number(prev.streak_count) || 1;
-    if (prev.last_visit_date === today) {
-      nextStreak = Math.max(1, prevCount);
-    } else if (prev.last_visit_date === yesterday) {
-      nextStreak = Math.max(2, prevCount + 1);
-    } else {
-      nextStreak = 1;
+    let nextStreak = 1;
+    if (existingRes.rows.length > 0) {
+      const prev = existingRes.rows[0];
+      const prevCount = Number(prev.streak_count) || 1;
+      if (prev.last_visit_date === today) {
+        nextStreak = Math.max(1, prevCount);
+      } else if (prev.last_visit_date === yesterday) {
+        nextStreak = Math.max(2, prevCount + 1);
+      } else {
+        nextStreak = 1;
+      }
     }
-  }
 
-  const isVip = nextStreak >= 3;
-  const email = (input.email || '').trim().slice(0, 180);
-  const displayName = (input.displayName || 'House Viewer').trim().slice(0, 120);
-  const photoURL = input.photoURL ? input.photoURL.trim().slice(0, 500) : null;
-  const avatarInitials = (input.avatarInitials || 'HD').trim().slice(0, 4);
-  const avatarColor = (input.avatarColor || '#EF4444').trim().slice(0, 24);
+    const isVip = nextStreak >= 3;
+    const email = (input.email || '').trim().slice(0, 180);
+    const displayName = (input.displayName || 'House Viewer').trim().slice(0, 120);
+    const photoURL = input.photoURL ? input.photoURL.trim().slice(0, 500) : null;
+    const avatarInitials = (input.avatarInitials || 'HD').trim().slice(0, 4);
+    const avatarColor = (input.avatarColor || '#EF4444').trim().slice(0, 24);
 
-  const upsertRes = await activePool.query<{
-    uid: string;
-    email: string;
-    display_name: string;
-    photo_url: string | null;
-    avatar_initials: string;
-    avatar_color: string;
-    streak_count: number;
-    last_visit_date: string;
-    is_vip: boolean;
-    bio: string;
-    preferred_language: string;
-    preferences_json: Record<string, unknown>;
-  }>(
-    `INSERT INTO users (
-       uid, email, display_name, photo_url, avatar_initials, avatar_color,
-       streak_count, last_visit_date, is_vip, created_at, updated_at
-     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-     ON CONFLICT (uid) DO UPDATE SET
-       email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE users.email END,
-       display_name = CASE WHEN users.display_name <> '' AND users.display_name <> 'House Viewer' THEN users.display_name ELSE EXCLUDED.display_name END,
-       photo_url = COALESCE(EXCLUDED.photo_url, users.photo_url),
-       avatar_initials = EXCLUDED.avatar_initials,
-       avatar_color = EXCLUDED.avatar_color,
-       streak_count = EXCLUDED.streak_count,
-       last_visit_date = EXCLUDED.last_visit_date,
-       is_vip = EXCLUDED.is_vip,
-       updated_at = NOW()
-     RETURNING uid, email, display_name, photo_url, avatar_initials, avatar_color, streak_count, last_visit_date, is_vip, bio, preferred_language, preferences_json`,
-    [
-      input.uid,
-      email,
-      displayName,
-      photoURL,
-      avatarInitials,
-      avatarColor,
-      nextStreak,
-      today,
-      isVip,
-    ]
-  );
+    const upsertRes = await dbQuery<{
+      uid: string;
+      email: string;
+      display_name: string;
+      photo_url: string | null;
+      avatar_initials: string;
+      avatar_color: string;
+      streak_count: number;
+      last_visit_date: string;
+      is_vip: boolean;
+      bio: string;
+      preferred_language: string;
+      preferences_json: Record<string, unknown>;
+    }>(
+      `INSERT INTO users (
+         uid, email, display_name, photo_url, avatar_initials, avatar_color,
+         streak_count, last_visit_date, is_vip, created_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+       ON CONFLICT (uid) DO UPDATE SET
+         email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE users.email END,
+         display_name = CASE WHEN users.display_name <> '' AND users.display_name <> 'House Viewer' THEN users.display_name ELSE EXCLUDED.display_name END,
+         photo_url = COALESCE(EXCLUDED.photo_url, users.photo_url),
+         avatar_initials = EXCLUDED.avatar_initials,
+         avatar_color = EXCLUDED.avatar_color,
+         streak_count = EXCLUDED.streak_count,
+         last_visit_date = EXCLUDED.last_visit_date,
+         is_vip = EXCLUDED.is_vip,
+         updated_at = NOW()
+       RETURNING uid, email, display_name, photo_url, avatar_initials, avatar_color, streak_count, last_visit_date, is_vip, bio, preferred_language, preferences_json`,
+      [
+        input.uid,
+        email,
+        displayName,
+        photoURL,
+        avatarInitials,
+        avatarColor,
+        nextStreak,
+        today,
+        isVip,
+      ]
+    );
 
-  const row = upsertRes.rows[0];
-  if (!row) return null;
+    const row = upsertRes?.rows[0];
+    if (!row) return null;
   return {
     uid: row.uid,
     email: row.email,
@@ -507,6 +558,9 @@ export async function syncUserInDb(input: {
     preferredLanguage: row.preferred_language || 'en',
     preferences: row.preferences_json || {},
   };
+  } catch {
+    return null;
+  }
 }
 
 export async function getUserFromDb(uid: string): Promise<DbUserRecord | null> {
@@ -577,7 +631,7 @@ export async function updateUserProfileInDb(input: {
     ...(input.preferences || {}),
   };
 
-  const res = await activePool.query<{
+  const res = await dbQuery<{
     uid: string;
     email: string;
     display_name: string;
@@ -605,7 +659,7 @@ export async function updateUserProfileInDb(input: {
     [input.uid, nextName, nextBio, nextLang, JSON.stringify(mergedPrefs)]
   );
 
-  const row = res.rows[0];
+  const row = res?.rows[0];
   if (!row) return null;
   return {
     uid: row.uid,
@@ -1143,28 +1197,25 @@ export interface SiteVisitorStats {
 }
 
 export async function getSiteVisitorStatsFromDb(): Promise<SiteVisitorStats | null> {
-  const activePool = getPool();
-  if (!activePool) return null;
-  await ensureDatabaseReady();
-  if (!dbAvailable) return null;
-
   const [onlineRes, dailyRes, totalsRes] = await Promise.all([
-    activePool.query<{ cnt: string }>(
+    dbQuery<{ cnt: string }>(
       `SELECT COUNT(DISTINCT visitor_id)::text AS cnt
        FROM active_sessions
        WHERE last_seen >= NOW() - INTERVAL '60 seconds'`
     ),
-    activePool.query<{ today_visitors: string }>(
+    dbQuery<{ today_visitors: string }>(
       `SELECT COALESCE(today_visitors, 0)::text AS today_visitors
        FROM daily_site_stats
        WHERE stat_date = CURRENT_DATE`
     ),
-    activePool.query<{ total_visitors: string; total_views: string }>(
+    dbQuery<{ total_visitors: string; total_views: string }>(
       `SELECT total_visitors::text, total_views::text
        FROM site_counter_totals
        WHERE id = 1`
     ),
   ]);
+
+  if (!onlineRes || !dailyRes || !totalsRes) return null;
 
   return {
     onlineNow: Number(onlineRes.rows[0]?.cnt ?? 0),
@@ -1178,16 +1229,11 @@ export async function recordVisitorHeartbeatInDb(
   sessionId: string,
   visitorId: string
 ): Promise<SiteVisitorStats | null> {
-  const activePool = getPool();
-  if (!activePool) return null;
-  await ensureDatabaseReady();
-  if (!dbAvailable) return null;
-
   const safeSession = sessionId.trim().slice(0, 128);
   const safeVisitor = visitorId.trim().slice(0, 128);
 
   // 1. Update live session heartbeat & prune stale sessions (>60s idle)
-  await activePool.query(
+  const hbRes = await dbQuery(
     `INSERT INTO active_sessions (session_id, visitor_id, last_seen)
      VALUES ($1, $2, NOW())
      ON CONFLICT (session_id) DO UPDATE SET
@@ -1195,43 +1241,45 @@ export async function recordVisitorHeartbeatInDb(
        last_seen = NOW()`,
     [safeSession, safeVisitor]
   );
-  await activePool.query(
+  if (!hbRes) return null;
+
+  await dbQuery(
     `DELETE FROM active_sessions WHERE last_seen < NOW() - INTERVAL '60 seconds'`
   );
 
   // 2. Count unique visitor across all time (starts from 0)
-  const newKnownRes = await activePool.query(
+  const newKnownRes = await dbQuery(
     `INSERT INTO known_visitors (visitor_id, first_seen)
      VALUES ($1, NOW())
      ON CONFLICT (visitor_id) DO NOTHING
      RETURNING 1`,
     [safeVisitor]
   );
-  const isNewAllTimeVisitor = newKnownRes.rows.length > 0 ? 1 : 0;
+  const isNewAllTimeVisitor = newKnownRes && newKnownRes.rows.length > 0 ? 1 : 0;
 
   // 3. Count unique daily visitor for today (starts from 0)
-  const newDailyRes = await activePool.query(
+  const newDailyRes = await dbQuery(
     `INSERT INTO daily_visitors (stat_date, visitor_id, first_seen)
      VALUES (CURRENT_DATE, $1, NOW())
      ON CONFLICT (stat_date, visitor_id) DO NOTHING
      RETURNING 1`,
     [safeVisitor]
   );
-  const isNewDailyVisitor = newDailyRes.rows.length > 0 ? 1 : 0;
+  const isNewDailyVisitor = newDailyRes && newDailyRes.rows.length > 0 ? 1 : 0;
 
   // 4. Count 1 page view per unique tab session (starts from 0, no heartbeat spam)
-  const newSessionViewRes = await activePool.query(
+  const newSessionViewRes = await dbQuery(
     `INSERT INTO viewed_sessions (session_id, created_at)
      VALUES ($1, NOW())
      ON CONFLICT (session_id) DO NOTHING
      RETURNING 1`,
     [safeSession]
   );
-  const isNewSessionView = newSessionViewRes.rows.length > 0 ? 1 : 0;
+  const isNewSessionView = newSessionViewRes && newSessionViewRes.rows.length > 0 ? 1 : 0;
 
   // 5. Persist atomic updates into daily_site_stats and site_counter_totals
   const [dailyRes, totalsRes, onlineRes] = await Promise.all([
-    activePool.query<{ today_visitors: string }>(
+    dbQuery<{ today_visitors: string }>(
       `INSERT INTO daily_site_stats (stat_date, today_visitors, total_views, updated_at)
        VALUES (CURRENT_DATE, $1, $2, NOW())
        ON CONFLICT (stat_date) DO UPDATE SET
@@ -1241,7 +1289,7 @@ export async function recordVisitorHeartbeatInDb(
        RETURNING today_visitors::text`,
       [isNewDailyVisitor, isNewSessionView]
     ),
-    activePool.query<{ total_visitors: string; total_views: string }>(
+    dbQuery<{ total_visitors: string; total_views: string }>(
       `INSERT INTO site_counter_totals (id, total_visitors, total_views, updated_at)
        VALUES (1, $1, $2, NOW())
        ON CONFLICT (id) DO UPDATE SET
@@ -1251,12 +1299,14 @@ export async function recordVisitorHeartbeatInDb(
        RETURNING total_visitors::text, total_views::text`,
       [isNewAllTimeVisitor, isNewSessionView]
     ),
-    activePool.query<{ cnt: string }>(
+    dbQuery<{ cnt: string }>(
       `SELECT COUNT(DISTINCT visitor_id)::text AS cnt
        FROM active_sessions
        WHERE last_seen >= NOW() - INTERVAL '60 seconds'`
     ),
   ]);
+
+  if (!dailyRes || !totalsRes || !onlineRes) return null;
 
   return {
     onlineNow: Number(onlineRes.rows[0]?.cnt ?? 1),
@@ -2494,6 +2544,91 @@ export async function upsertMovieSourcesInDb(
       ]
     ).catch(() => {});
   }
+}
+
+export async function listMoviesFallbackFromDb(
+  limit = 24,
+  searchQuery?: string
+): Promise<
+  Array<{
+    id: string;
+    slug: string;
+    title: string;
+    cover: string;
+    coverHz: string;
+    coverVt: string;
+    rating: string;
+    quality: string;
+    badge: string;
+    description: string;
+    genres: string[];
+    updateInfo: string;
+    movieType: string;
+  }>
+> {
+  const safeLimit = Math.min(60, Math.max(1, Math.floor(limit || 24)));
+  const cleanQ = (searchQuery || '').trim();
+  const res = cleanQ
+    ? await dbQuery<{
+        movie_id: string;
+        slug: string;
+        title: string;
+        cover: string;
+        cover_hz: string;
+        poster: string;
+        rating: string;
+        quality: string;
+        badge: string;
+        synopsis: string;
+        genres: string[];
+        update_info: string;
+        movie_type: string;
+      }>(
+        `SELECT movie_id, slug, title, cover, cover_hz, poster, rating, quality, badge, synopsis, genres, update_info, movie_type
+         FROM movies
+         WHERE title ILIKE $1 OR synopsis ILIKE $1 OR EXISTS (SELECT 1 FROM unnest(genres) AS g WHERE g ILIKE $1)
+         ORDER BY popularity_score DESC, updated_at DESC
+         LIMIT $2`,
+        [`%${cleanQ}%`, safeLimit]
+      )
+    : await dbQuery<{
+        movie_id: string;
+        slug: string;
+        title: string;
+        cover: string;
+        cover_hz: string;
+        poster: string;
+        rating: string;
+        quality: string;
+        badge: string;
+        synopsis: string;
+        genres: string[];
+        update_info: string;
+        movie_type: string;
+      }>(
+        `SELECT movie_id, slug, title, cover, cover_hz, poster, rating, quality, badge, synopsis, genres, update_info, movie_type
+         FROM movies
+         ORDER BY popularity_score DESC, updated_at DESC
+         LIMIT $1`,
+        [safeLimit]
+      );
+
+  if (!res) return [];
+  return res.rows.map((r) => ({
+    id: r.movie_id || r.slug,
+    slug: r.slug,
+    title: r.title,
+    cover: r.cover || r.poster,
+    coverHz: r.cover_hz || r.cover,
+    coverVt: r.poster || r.cover,
+    rating: r.rating || '',
+    quality: r.quality || 'HD',
+    badge: r.badge || '',
+    description: r.synopsis || '',
+    genres: Array.isArray(r.genres) ? r.genres : [],
+    updateInfo: r.update_info || '',
+    movieType: r.movie_type || 'movie',
+  }));
 }
 
 export async function getMovieSourcesFromDb(

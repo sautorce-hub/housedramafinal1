@@ -69,6 +69,11 @@ import {
   type ProgrammaticLandingConfig,
   resolveProgrammaticLanding,
 } from './src/utils/programmaticSeo.ts';
+import {
+  MOLA_PLATFORM_ORIGIN,
+  PROVIDER_LOGO_PATHS,
+  PROVIDER_SLUG_MAP,
+} from './src/constants/providerLogos.ts';
 
 function resolvePort(): number {
   const portFlagIndex = process.argv.indexOf('--port');
@@ -192,6 +197,33 @@ function cleanText(val: unknown, fallback = ''): string {
     return fallback;
   }
   return trimmed;
+}
+
+function pipeWebStreamToExpress(
+  body: unknown,
+  req: Request,
+  res: Response,
+  fallbackError = 'Upstream stream error'
+): void {
+  const nodeStream = Readable.fromWeb(
+    body as unknown as import('node:stream/web').ReadableStream
+  );
+  const cleanup = () => {
+    if (!nodeStream.destroyed) {
+      nodeStream.destroy();
+    }
+  };
+  nodeStream.on('error', () => {
+    cleanup();
+    if (!res.headersSent) {
+      res.status(502).json({ ok: false, error: fallbackError });
+    } else {
+      res.end();
+    }
+  });
+  req.on('close', cleanup);
+  res.on('error', cleanup);
+  nodeStream.pipe(res);
 }
 
 function escapeHtmlAttr(val: string): string {
@@ -1058,12 +1090,12 @@ async function startServer() {
     res.json({ ok: true, service: 'house-drama-ssr', db });
   });
 
-  // Database-cached Home endpoint (reads SQLite cache first, stale-while-revalidate async refresh)
+  // Database-cached Home endpoint (reads cache first, stale-while-revalidate async refresh)
   app.get('/api/home', async (req: Request, res: Response) => {
+    const lang = typeof req.query.lang === 'string' ? req.query.lang : 'en';
+    const provider =
+      typeof req.query.provider === 'string' ? req.query.provider : 'All';
     try {
-      const lang = typeof req.query.lang === 'string' ? req.query.lang : 'en';
-      const provider =
-        typeof req.query.provider === 'string' ? req.query.provider : 'All';
       const data = await getCachedHomeData(getMolaToken(), lang, provider);
       res.setHeader(
         'Cache-Control',
@@ -1074,10 +1106,23 @@ async function startServer() {
         data.cached ? (data.stale ? 'STALE' : 'HIT') : 'MISS'
       );
       res.json(data);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to load home catalog';
-      res.status(500).json({ error: message });
+    } catch {
+      const now = Date.now();
+      res.status(200).json({
+        lang,
+        provider,
+        heroSpotlights: [],
+        trendingTop: [],
+        hotReleases: [],
+        catalogGrid: [],
+        providerCounts: {},
+        updatedAt: now,
+        expiresAt: now + 30_000,
+        cached: false,
+        stale: false,
+        source: 'empty-fallback',
+        storage: 'memory',
+      });
     }
   });
 
@@ -1111,6 +1156,89 @@ async function startServer() {
         error: err instanceof Error ? err.message : 'Failed to inspect cache status',
       });
     }
+  });
+
+  let cachedPlatformsPayload: {
+    expiresAt: number;
+    platforms: Array<{
+      id: string;
+      slug: string;
+      name: string;
+      logo: string;
+      icon: string;
+    }>;
+  } | null = null;
+
+  app.get('/api/platforms', async (_req: Request, res: Response) => {
+    const now = Date.now();
+    if (cachedPlatformsPayload && now < cachedPlatformsPayload.expiresAt) {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.json({
+        ok: true,
+        source: `${MOLA_PLATFORM_ORIGIN}/#platforms`,
+        cached: true,
+        platforms: cachedPlatformsPayload.platforms,
+      });
+      return;
+    }
+
+    const liveSlugLogos = new Map<string, { name?: string; logo: string }>();
+    try {
+      const upstream = await fetch(`${MOLA_PLATFORM_ORIGIN}/`, {
+        method: 'GET',
+        headers: {
+          Accept: 'text/html',
+          'User-Agent': 'HouseDrama/2.0 (+https://housedrama.fun)',
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (upstream.ok) {
+        const html = await upstream.text();
+        const cards = html.matchAll(/<a[^>]*class="plat-card"[^>]*>([\s\S]*?)<\/a>/gi);
+        for (const match of cards) {
+          const cardHtml = match[0];
+          const slug = (cardHtml.match(/data-slug="([^"]+)"/i) || [])[1]?.trim().toLowerCase();
+          const imgPath = (cardHtml.match(/src="([^"]+)"/i) || [])[1]?.trim();
+          const label = (cardHtml.match(/class="plat-name"[^>]*>([^<]+)</i) || [])[1]?.trim();
+          if (slug && imgPath) {
+            const absLogo = imgPath.startsWith('http')
+              ? imgPath
+              : `${MOLA_PLATFORM_ORIGIN}${imgPath.startsWith('/') ? '' : '/'}${imgPath}`;
+            liveSlugLogos.set(slug, { name: label, logo: absLogo });
+          }
+        }
+      }
+    } catch {
+      // Fallback safely to static verified mapping below
+    }
+
+    const platforms = Object.entries(PROVIDER_LOGO_PATHS).map(([id, fallbackPath]) => {
+      const slug =
+        PROVIDER_SLUG_MAP[id as keyof typeof PROVIDER_SLUG_MAP] || id.toLowerCase();
+      const liveEntry = liveSlugLogos.get(slug);
+      const officialLogo =
+        liveEntry?.logo || `${MOLA_PLATFORM_ORIGIN}${fallbackPath}`;
+      return {
+        id,
+        slug,
+        name: liveEntry?.name || id,
+        logo: officialLogo,
+        icon: officialLogo,
+      };
+    });
+
+    cachedPlatformsPayload = {
+      expiresAt: now + 6 * 60 * 60 * 1000,
+      platforms,
+    };
+
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json({
+      ok: true,
+      source: `${MOLA_PLATFORM_ORIGIN}/#platforms`,
+      cached: false,
+      platforms,
+    });
   });
 
   function sanitizeMolaUrlString(str: string): string {
@@ -1347,15 +1475,34 @@ async function startServer() {
       if (contentLength) res.setHeader('Content-Length', contentLength);
 
       if (upstream.body) {
-        Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream).pipe(res);
+        pipeWebStreamToExpress(
+          upstream.body,
+          req,
+          res,
+          'Upstream API gateway stream interrupted'
+        );
       } else {
         const buf = Buffer.from(await upstream.arrayBuffer());
         res.send(buf);
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Upstream API gateway error';
-      res.status(502).json({ success: false, error: message });
+      if (cacheableListGet) {
+        const staleFallback = await getCachedMolaApiResponse(molaCacheKey).catch(
+          () => null
+        );
+        if (staleFallback && !res.headersSent) {
+          res.status(staleFallback.statusCode);
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('X-Mola-Cache', 'STALE-FALLBACK');
+          res.send(staleFallback.payloadJson);
+          return;
+        }
+      }
+      if (!res.headersSent) {
+        const message =
+          err instanceof Error ? err.message : 'Upstream API gateway error';
+        res.status(502).json({ success: false, error: message });
+      }
     }
   });
 
@@ -1507,15 +1654,22 @@ async function startServer() {
       }
 
       if (upstream.body) {
-        Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream).pipe(res);
+        pipeWebStreamToExpress(
+          upstream.body,
+          req,
+          res,
+          'Upstream proxy stream interrupted'
+        );
       } else {
         const buf = Buffer.from(await upstream.arrayBuffer());
         res.send(buf);
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Upstream proxy request failed';
-      res.status(502).json({ error: message });
+      if (!res.headersSent) {
+        const message =
+          err instanceof Error ? err.message : 'Upstream proxy request failed';
+        res.status(502).json({ error: message });
+      }
     }
   });
 
@@ -1696,15 +1850,22 @@ async function startServer() {
       if (contentLength) res.setHeader('Content-Length', contentLength);
 
       if (upstream.body) {
-        Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream).pipe(res);
+        pipeWebStreamToExpress(
+          upstream.body,
+          req,
+          res,
+          'Signed stream connection interrupted'
+        );
       } else {
         const buf = Buffer.from(await upstream.arrayBuffer());
         res.send(buf);
       }
     } catch (err) {
-      res.status(502).json({
-        error: err instanceof Error ? err.message : 'Signed stream proxy failed',
-      });
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: err instanceof Error ? err.message : 'Signed stream proxy failed',
+        });
+      }
     }
   });
 

@@ -298,6 +298,8 @@ export interface Translations {
     todayVisitors: string;
     totalVisitors: string;
     totalViews: string;
+    collectionsTitle: string;
+    communityTitle: string;
     linksTitle: string;
     about: string;
     privacy: string;
@@ -657,19 +659,22 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     },
     footer: {
       tagline:
-        'Luxury multi-provider Chinese & vertical short drama theater powered by 49+ live platforms.',
+        'A refined dark-cinema streaming destination for vertical short dramas, Asian series, and feature films.',
       onlineNow: 'Online Now',
       todayVisitors: "Today's Visitors",
       totalVisitors: 'Total Visitors',
       totalViews: 'Total Views',
-      linksTitle: 'Platform & Legal',
+      collectionsTitle: 'Browse Collections',
+      communityTitle: 'Audience Reach',
+      linksTitle: 'Legal & Information',
       about: 'About Us',
       privacy: 'Privacy Policy',
       terms: 'Terms of Service',
       dmca: 'DMCA Disclaimer',
-      contact: 'Contact & Partnership',
-      helpCenter: 'Help Center / FAQ',
-      rights: '© 2026 House Drama. All rights reserved.',
+      contact: 'Contact & Support',
+      helpCenter: 'Help Center & FAQ',
+      rights:
+        '© 2026 House Drama. All rights reserved. Powered by Advanced Streaming Architecture.',
     },
     legal: {
       about: {
@@ -1052,19 +1057,22 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     },
     footer: {
       tagline:
-        'Platform streaming drama vertikal & drama Tiongkok multi-provider dari 49+ sumber resmi.',
+        'Destinasi streaming sinematik gelap untuk drama pendek vertikal, serial Asia, dan film layar lebar pilihan.',
       onlineNow: 'Sedang Online',
       todayVisitors: 'Pengunjung Hari Ini',
       totalVisitors: 'Total Pengunjung',
       totalViews: 'Total Tayangan',
+      collectionsTitle: 'Jelajahi Koleksi',
+      communityTitle: 'Jangkauan Pemirsa',
       linksTitle: 'Informasi & Legal',
-      about: 'Tentang House Drama',
+      about: 'Tentang Kami',
       privacy: 'Kebijakan Privasi',
       terms: 'Syarat & Ketentuan',
       dmca: 'Penafian DMCA',
-      contact: 'Kontak & Kemitraan',
-      helpCenter: 'Pusat Bantuan / FAQ',
-      rights: '© 2026 House Drama. Hak cipta dilindungi.',
+      contact: 'Kontak & Dukungan',
+      helpCenter: 'Pusat Bantuan & FAQ',
+      rights:
+        '© 2026 House Drama. All rights reserved. Powered by Advanced Streaming Architecture.',
     },
     legal: {
       about: {
@@ -1441,19 +1449,22 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
         '请点击浏览器菜单（⋮ 或分享）并选择“安装应用”或“添加到主屏幕”。',
     },
     footer: {
-      tagline: '聚合 49+ 授权短剧片源的奢华竖屏微短剧流媒体平台。',
+      tagline: '专注竖屏微短剧、亚洲精选剧集与院线长片的暗黑美学流媒体影院。',
       onlineNow: '当前在线',
       todayVisitors: '今日访客',
       totalVisitors: '总访客数',
       totalViews: '累计观看',
-      linksTitle: '平台与法律条款',
+      collectionsTitle: '精选分类',
+      communityTitle: '观影统计',
+      linksTitle: '法律与支持',
       about: '关于我们',
       privacy: '隐私政策',
       terms: '服务条款',
       dmca: 'DMCA 版权声明',
-      contact: '联系与合作',
-      helpCenter: '帮助中心 / FAQ',
-      rights: '© 2026 House Drama. 保留所有权利。',
+      contact: '联系与支持',
+      helpCenter: '帮助中心与常见问题',
+      rights:
+        '© 2026 House Drama. 保留所有权利。Powered by Advanced Streaming Architecture.',
     },
     legal: {
       about: {
@@ -1836,19 +1847,22 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     },
     footer: {
       tagline:
-        'Rạp phim ngắn dọc & phim Trung Quốc đa nguồn cao cấp kết nối 49+ nền tảng.',
+        'Không gian phát trực tuyến điện ảnh tối giản dành cho phim ngắn dọc, phim bộ châu Á và điện ảnh chọn lọc.',
       onlineNow: 'Đang trực tuyến',
       todayVisitors: 'Khách hôm nay',
       totalVisitors: 'Tổng lượt khách',
       totalViews: 'Tổng lượt xem',
-      linksTitle: 'Nền tảng & Pháp lý',
+      collectionsTitle: 'Bộ sưu tập',
+      communityTitle: 'Thống kê',
+      linksTitle: 'Pháp lý & Hỗ trợ',
       about: 'Về chúng tôi',
       privacy: 'Chính sách bảo mật',
       terms: 'Điều khoản dịch vụ',
       dmca: 'Miễn trừ DMCA',
-      contact: 'Liên hệ & Hợp tác',
-      helpCenter: 'Trợ giúp / FAQ',
-      rights: '© 2026 House Drama. Bảo lưu mọi quyền.',
+      contact: 'Liên hệ & Hỗ trợ',
+      helpCenter: 'Trung tâm Trợ giúp',
+      rights:
+        '© 2026 House Drama. Bảo lưu mọi quyền. Powered by Advanced Streaming Architecture.',
     },
     legal: {
       about: {

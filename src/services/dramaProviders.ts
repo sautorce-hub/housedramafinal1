@@ -522,9 +522,12 @@ function normalizeDrama(
     Boolean(raw.isVip) ||
     cornerText.toLowerCase().includes('vip');
 
+  const slugVal = cleanText(raw.slug);
+
   return {
     bookId,
     title,
+    ...(slugVal ? { slug: slugVal } : {}),
     cover,
     description,
     chapterCount,
@@ -535,6 +538,7 @@ function normalizeDrama(
     author: cleanText(raw.author) || undefined,
     isVip,
     provider,
+    mediaType: 'drama',
     rank: typeof index === 'number' ? index + 1 : undefined,
   };
 }
@@ -4622,7 +4626,11 @@ export async function searchAllProviders(
   if (!trimmed) return { items: [], hasMore: false, page };
 
   if (providerFilter !== 'All') {
-    return getProviderAdapter(providerFilter).searchDramas(trimmed, page);
+    try {
+      return await getProviderAdapter(providerFilter).searchDramas(trimmed, page);
+    } catch {
+      return { items: [], hasMore: false, page };
+    }
   }
 
   const settled = await Promise.allSettled(

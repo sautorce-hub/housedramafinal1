@@ -457,12 +457,26 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
             .map((entry) => {
               const prov: MediaProviderName =
                 entry.provider || entry.drama?.provider || 'DramaBox';
+              const resolvedType =
+                prov === 'LK21' ||
+                entry.mediaType === 'movie' ||
+                entry.drama?.mediaType === 'movie'
+                  ? 'movie'
+                  : 'drama';
               return {
                 bookId: entry.bookId || entry.drama.bookId,
                 provider: prov,
+                mediaType: resolvedType,
                 title: entry.title || entry.drama.title,
                 cover: entry.cover || entry.drama.cover || '',
-                drama: { ...entry.drama, provider: prov },
+                drama: {
+                  ...entry.drama,
+                  provider: prov,
+                  mediaType: resolvedType,
+                  slug:
+                    entry.drama.slug ||
+                    (prov === 'LK21' ? entry.bookId || entry.drama.bookId : undefined),
+                },
                 episode: typeof entry.episode === 'number' ? entry.episode : 1,
                 currentTime:
                   typeof entry.currentTime === 'number' ? entry.currentTime : 0,
@@ -713,6 +727,7 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
         items?: Array<{
           bookId: string;
           provider: MediaProviderName;
+          mediaType?: 'drama' | 'movie';
           episode: number;
           currentTime: number;
           duration: number;
@@ -727,11 +742,19 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
         .map((e) => {
           const prov = (e.provider || 'DramaBox') as MediaProviderName;
           const d = e.drama || {};
+          const resolvedType =
+            prov === 'LK21' ||
+            e.mediaType === 'movie' ||
+            d.mediaType === 'movie'
+              ? 'movie'
+              : 'drama';
           const dramaObj: DramaItem = {
             bookId: e.bookId,
-            title: d.title || 'Drama Series',
-            slug: d.slug,
+            title:
+              d.title || (resolvedType === 'movie' ? 'Saved Movie' : 'Drama Series'),
+            slug: d.slug || (prov === 'LK21' ? e.bookId : undefined),
             cover: d.cover || '',
+            coverHz: d.coverHz,
             description: d.description || '',
             chapterCount: Number(d.chapterCount) || 1,
             tags: Array.isArray(d.tags) ? d.tags : [],
@@ -739,14 +762,21 @@ export const DramaProvider: React.FC<{ children: React.ReactNode }> = ({
             corner: d.corner,
             protagonist: d.protagonist,
             author: d.author,
+            director: d.director,
+            actors: Array.isArray(d.actors) ? d.actors : undefined,
+            year: d.year,
+            area: d.area,
+            quality: d.quality,
             isVip: Boolean(d.isVip),
             provider: prov,
+            mediaType: resolvedType,
             status: d.status,
             rating: d.rating,
           };
           return {
             bookId: e.bookId,
             provider: prov,
+            mediaType: resolvedType,
             title: dramaObj.title,
             cover: dramaObj.cover,
             drama: dramaObj,

@@ -125,6 +125,11 @@ const CinemaVideoPlayer = lazy(() =>
     default: m.CinemaVideoPlayer,
   }))
 );
+const MovieVideoPlayer = lazy(() =>
+  import('./components/MovieVideoPlayer').then((m) => ({
+    default: m.MovieVideoPlayer,
+  }))
+);
 const SearchModal = lazy(() =>
   import('./components/SearchModal').then((m) => ({
     default: m.SearchModal,
@@ -3653,71 +3658,145 @@ export default function App() {
           />
         )}
 
-        {playerState && (
-          <CinemaVideoPlayer
-            drama={playerState?.drama ?? null}
-            episodeNumber={playerState?.episode ?? 1}
-            initialTime={playerState?.initialTime ?? 0}
-            episodes={playerState?.episodes ?? []}
-            relatedDramas={
-              playerState?.drama?.provider === 'LK21' && moviesPool.length > 0
-                ? moviesPool
-                : allLoadedDramas
-            }
-            onSwitchDrama={(nextDrama, ep = 1) => {
-              handlePlayEpisode(nextDrama, ep, []);
-            }}
-            onClose={() => {
-              const activeDrama = activeDramaRoute?.drama ?? playerState?.drama;
-              setPlayerState(null);
-              if (window.location.search.includes('drama=') || window.location.search.includes('ep=')) {
-                window.history.replaceState(
-                  window.history.state,
-                  '',
-                  window.location.pathname || '/'
-                );
+        {playerState &&
+          (playerState.drama.provider === 'LK21' ||
+          playerState.drama.mediaType === 'movie' ? (
+            <MovieVideoPlayer
+              drama={playerState.drama}
+              episodeNumber={playerState.episode ?? 1}
+              initialTime={playerState.initialTime ?? 0}
+              episodes={playerState.episodes ?? []}
+              relatedDramas={
+                moviesPool.length > 0 ? moviesPool : allLoadedDramas
               }
-              if (activeDramaRoute?.drama) {
-                syncDramaDocumentSeo(
-                  activeDramaRoute.drama,
-                  activeDramaRoute.episodes,
-                  language
+              onSwitchDrama={(nextDrama, ep = 1) => {
+                handlePlayEpisode(nextDrama, ep, []);
+              }}
+              onClose={() => {
+                const activeDrama = activeDramaRoute?.drama ?? playerState?.drama;
+                setPlayerState(null);
+                if (
+                  window.location.search.includes('drama=') ||
+                  window.location.search.includes('ep=')
+                ) {
+                  window.history.replaceState(
+                    window.history.state,
+                    '',
+                    window.location.pathname || '/'
+                  );
+                }
+                if (activeDramaRoute?.drama) {
+                  syncDramaDocumentSeo(
+                    activeDramaRoute.drama,
+                    activeDramaRoute.episodes,
+                    language
+                  );
+                } else if (
+                  activeDrama &&
+                  (window.location.pathname.startsWith('/drama/') ||
+                    window.location.pathname.startsWith('/movie/'))
+                ) {
+                  syncDramaDocumentSeo(
+                    activeDrama,
+                    playerState?.episodes ?? [],
+                    language
+                  );
+                } else {
+                  syncSectionDocumentSeo(activeTab);
+                }
+              }}
+              onChangeEpisode={(nextEp) => {
+                setPlayerState((prev) => {
+                  if (!prev) return null;
+                  recordWatchProgress(prev.drama, nextEp, 0, 0, true);
+                  return { ...prev, episode: nextEp, initialTime: 0 };
+                });
+              }}
+              onEpisodesLoaded={(eps) => {
+                setPlayerState((prev) =>
+                  prev ? { ...prev, episodes: eps } : null
                 );
-              } else if (
-                activeDrama &&
-                (window.location.pathname.startsWith('/drama/') ||
-                  window.location.pathname.startsWith('/movie/'))
-              ) {
-                syncDramaDocumentSeo(activeDrama, playerState?.episodes ?? [], language);
-              } else {
-                syncSectionDocumentSeo(activeTab);
-              }
-            }}
-            onChangeEpisode={(nextEp) => {
-              setPlayerState((prev) => {
-                if (!prev) return null;
-                recordWatchProgress(prev.drama, nextEp, 0, 0, true);
-                return { ...prev, episode: nextEp, initialTime: 0 };
-              });
-            }}
-            onEpisodesLoaded={(eps) => {
-              setPlayerState((prev) =>
-                prev ? { ...prev, episodes: eps } : null
-              );
-            }}
-            onProgressUpdate={(ep, currentTime, duration, immediate) => {
-              if (playerState?.drama) {
-                recordWatchProgress(
-                  playerState.drama,
-                  ep,
-                  currentTime,
-                  duration,
-                  immediate
+              }}
+              onProgressUpdate={(ep, currentTime, duration, immediate) => {
+                if (playerState?.drama) {
+                  recordWatchProgress(
+                    playerState.drama,
+                    ep,
+                    currentTime,
+                    duration,
+                    immediate
+                  );
+                }
+              }}
+            />
+          ) : (
+            <CinemaVideoPlayer
+              drama={playerState.drama}
+              episodeNumber={playerState.episode ?? 1}
+              initialTime={playerState.initialTime ?? 0}
+              episodes={playerState.episodes ?? []}
+              relatedDramas={allLoadedDramas}
+              onSwitchDrama={(nextDrama, ep = 1) => {
+                handlePlayEpisode(nextDrama, ep, []);
+              }}
+              onClose={() => {
+                const activeDrama = activeDramaRoute?.drama ?? playerState?.drama;
+                setPlayerState(null);
+                if (
+                  window.location.search.includes('drama=') ||
+                  window.location.search.includes('ep=')
+                ) {
+                  window.history.replaceState(
+                    window.history.state,
+                    '',
+                    window.location.pathname || '/'
+                  );
+                }
+                if (activeDramaRoute?.drama) {
+                  syncDramaDocumentSeo(
+                    activeDramaRoute.drama,
+                    activeDramaRoute.episodes,
+                    language
+                  );
+                } else if (
+                  activeDrama &&
+                  (window.location.pathname.startsWith('/drama/') ||
+                    window.location.pathname.startsWith('/movie/'))
+                ) {
+                  syncDramaDocumentSeo(
+                    activeDrama,
+                    playerState?.episodes ?? [],
+                    language
+                  );
+                } else {
+                  syncSectionDocumentSeo(activeTab);
+                }
+              }}
+              onChangeEpisode={(nextEp) => {
+                setPlayerState((prev) => {
+                  if (!prev) return null;
+                  recordWatchProgress(prev.drama, nextEp, 0, 0, true);
+                  return { ...prev, episode: nextEp, initialTime: 0 };
+                });
+              }}
+              onEpisodesLoaded={(eps) => {
+                setPlayerState((prev) =>
+                  prev ? { ...prev, episodes: eps } : null
                 );
-              }
-            }}
-          />
-        )}
+              }}
+              onProgressUpdate={(ep, currentTime, duration, immediate) => {
+                if (playerState?.drama) {
+                  recordWatchProgress(
+                    playerState.drama,
+                    ep,
+                    currentTime,
+                    duration,
+                    immediate
+                  );
+                }
+              }}
+            />
+          ))}
 
         {authModalOpen && <AuthProfileModal />}
         <HelpCenterModal />

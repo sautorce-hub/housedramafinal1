@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X, Check, Layers } from 'lucide-react';
 import { useDramaContext } from '../context/DramaContext';
+import {
+  getOfficialProviderLogoUrl,
+  getProxiedLogoUrl,
+} from '../constants/providerLogos';
 import type { ProviderId, ProviderName } from '../types/drama';
 
 interface ProviderHubModalProps {
@@ -542,58 +546,93 @@ function BrandFallbackEmblem({
   );
 }
 
+let syncedPlatformLogosCache: Record<string, string> | null = null;
+
+async function loadSyncedPlatformLogos(): Promise<Record<string, string>> {
+  if (syncedPlatformLogosCache) return syncedPlatformLogosCache;
+  try {
+    const res = await fetch('/api/platforms', {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return {};
+    const json = (await res.json()) as {
+      platforms?: Array<{ id?: string; logo?: string; icon?: string }>;
+    };
+    const map: Record<string, string> = {};
+    if (Array.isArray(json.platforms)) {
+      for (const entry of json.platforms) {
+        const id = entry.id?.trim();
+        const url = (entry.logo || entry.icon || '').trim();
+        if (id && url) map[id] = url;
+      }
+    }
+    syncedPlatformLogosCache = map;
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 const ProviderBrandLogo: React.FC<{
   providerId: Exclude<ProviderId, 'All'>;
   name: string;
-}> = ({ providerId, name }) => {
+  overrideLogoUrl?: string;
+}> = ({ providerId, name, overrideLogoUrl }) => {
   const spec = PROVIDER_BRAND_META[providerId];
-  const [sourceStage, setSourceStage] = useState<0 | 1 | 2>(0);
+  const officialUrl = overrideLogoUrl || getOfficialProviderLogoUrl(providerId);
+  const proxiedUrl = getProxiedLogoUrl(officialUrl);
+
+  const [sourceStage, setSourceStage] = useState<0 | 1 | 2>(
+    officialUrl ? 0 : 2
+  );
   const [imgReady, setImgReady] = useState(false);
 
-  const primaryUrl = `https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${spec.domain}&size=128`;
-  const secondaryDomain = spec.secondaryDomain || spec.domain;
-  const secondaryUrl = `https://www.google.com/s2/favicons?domain=${secondaryDomain}&sz=128`;
+  useEffect(() => {
+    setSourceStage(officialUrl ? 0 : 2);
+    setImgReady(false);
+  }, [officialUrl]);
 
   const currentSrc =
-    sourceStage === 0 ? primaryUrl : sourceStage === 1 ? secondaryUrl : '';
+    sourceStage === 0 ? officialUrl : sourceStage === 1 ? proxiedUrl : '';
 
   if (sourceStage >= 2 || !currentSrc) {
     return <BrandFallbackEmblem providerId={providerId} spec={spec} />;
   }
 
-  const tileClasses =
-    spec.surfaceTint === 'light'
-      ? 'bg-white border-white/25'
-      : 'bg-[#121218] border-white/20';
-
   return (
     <div className="relative w-11 h-11 shrink-0">
-      {!imgReady && <BrandFallbackEmblem providerId={providerId} spec={spec} />}
+      {!imgReady && (
+        <div
+          aria-hidden="true"
+          className="w-11 h-11 rounded-xl bg-[#18181D] border border-white/10 animate-pulse"
+        />
+      )}
       <div
-        className={`w-11 h-11 rounded-xl border p-1.5 flex items-center justify-center shadow-lg overflow-hidden transition-opacity duration-150 ${tileClasses} ${
-          imgReady ? 'opacity-100 relative' : 'opacity-0 absolute inset-0 pointer-events-none'
+        className={`w-11 h-11 rounded-xl bg-[#0D0D11] border border-white/15 p-1 flex items-center justify-center shadow-md overflow-hidden transition-opacity duration-150 ${
+          imgReady
+            ? 'opacity-100 relative'
+            : 'opacity-0 absolute inset-0 pointer-events-none'
         }`}
       >
         <img
           src={currentSrc}
-          alt={`${name} logo`}
+          alt={`${name} official logo`}
           loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
-          className="w-full h-full object-contain rounded-md"
+          className="w-full h-full object-contain rounded-lg"
           onLoad={(e) => {
             const img = e.currentTarget;
-            // Reject tiny default 16px globe placeholder favicons
-            if (img.naturalWidth < 28 || img.naturalHeight < 28) {
+            if (img.naturalWidth === 0 && img.naturalHeight === 0) {
               setImgReady(false);
-              setSourceStage((prev) => (prev === 0 ? 1 : 2));
+              setSourceStage((prev) => (prev === 0 && proxiedUrl ? 1 : 2));
               return;
             }
             setImgReady(true);
           }}
           onError={() => {
             setImgReady(false);
-            setSourceStage((prev) => (prev === 0 ? 1 : 2));
+            setSourceStage((prev) => (prev === 0 && proxiedUrl ? 1 : 2));
           }}
         />
       </div>
@@ -610,13 +649,24 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
 }) => {
   const { t } = useDramaContext();
   const [searchQuery, setSearchQuery] = useState('');
+  const [liveLogos, setLiveLogos] = useState<Record<string, string>>(
+    () => syncedPlatformLogosCache ?? {}
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setSearchQuery('');
-      window.setTimeout(() => inputRef.current?.focus(), 60);
-    }
+    if (!open) return;
+    setSearchQuery('');
+    window.setTimeout(() => inputRef.current?.focus(), 60);
+    let active = true;
+    void loadSyncedPlatformLogos().then((map) => {
+      if (active && Object.keys(map).length > 0) {
+        setLiveLogos(map);
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -648,7 +698,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Billionaire Romance, Revenge & VIP Exclusives',
         available: true,
         count: counts.DramaBox ?? 0,
-        logo: <ProviderBrandLogo providerId="DramaBox" name="DramaBox" />,
+        logo: <ProviderBrandLogo providerId="DramaBox" name="DramaBox" overrideLogoUrl={liveLogos.DramaBox} />,
       },
       {
         id: 'NetShort',
@@ -656,7 +706,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending Vertical Shorts & Donghua Hits',
         available: true,
         count: counts.NetShort ?? 0,
-        logo: <ProviderBrandLogo providerId="NetShort" name="NetShort" />,
+        logo: <ProviderBrandLogo providerId="NetShort" name="NetShort" overrideLogoUrl={liveLogos.NetShort} />,
       },
       {
         id: 'AnyReel',
@@ -664,7 +714,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Asian Short Dramas, Werewolf & Contract Romance',
         available: true,
         count: counts.AnyReel ?? 0,
-        logo: <ProviderBrandLogo providerId="AnyReel" name="AnyReel" />,
+        logo: <ProviderBrandLogo providerId="AnyReel" name="AnyReel" overrideLogoUrl={liveLogos.AnyReel} />,
       },
       {
         id: 'Melolo',
@@ -672,7 +722,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'System Awakening, Anime Shorts & Encrypted HD Streams',
         available: true,
         count: counts.Melolo ?? 0,
-        logo: <ProviderBrandLogo providerId="Melolo" name="Melolo" />,
+        logo: <ProviderBrandLogo providerId="Melolo" name="Melolo" overrideLogoUrl={liveLogos.Melolo} />,
       },
       {
         id: 'WeTV',
@@ -680,7 +730,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Premium Asian Series & Youth Campus Dramas',
         available: true,
         count: counts.WeTV ?? 0,
-        logo: <ProviderBrandLogo providerId="WeTV" name="WeTV" />,
+        logo: <ProviderBrandLogo providerId="WeTV" name="WeTV" overrideLogoUrl={liveLogos.WeTV} />,
       },
       {
         id: 'ReelShort',
@@ -688,7 +738,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Global Billionaire, Werewolf & Romance Hits',
         available: true,
         count: counts.ReelShort ?? 0,
-        logo: <ProviderBrandLogo providerId="ReelShort" name="ReelShort" />,
+        logo: <ProviderBrandLogo providerId="ReelShort" name="ReelShort" overrideLogoUrl={liveLogos.ReelShort} />,
       },
       {
         id: 'ReelShortV2',
@@ -696,7 +746,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Extended ReelShort Multi-Region Catalog',
         available: true,
         count: counts.ReelShortV2 ?? 0,
-        logo: <ProviderBrandLogo providerId="ReelShortV2" name="ReelShort V2" />,
+        logo: <ProviderBrandLogo providerId="ReelShortV2" name="ReelShort V2" overrideLogoUrl={liveLogos.ReelShortV2} />,
       },
       {
         id: 'ShortMax',
@@ -704,7 +754,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Dual AES/Plain HD Vertical Blockbusters',
         available: true,
         count: counts.ShortMax ?? 0,
-        logo: <ProviderBrandLogo providerId="ShortMax" name="ShortMax" />,
+        logo: <ProviderBrandLogo providerId="ShortMax" name="ShortMax" overrideLogoUrl={liveLogos.ShortMax} />,
       },
       {
         id: 'ShortMaxV2',
@@ -712,7 +762,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'ShortMax V2 Mirror & International Feed',
         available: true,
         count: counts.ShortMaxV2 ?? 0,
-        logo: <ProviderBrandLogo providerId="ShortMaxV2" name="ShortMax V2" />,
+        logo: <ProviderBrandLogo providerId="ShortMaxV2" name="ShortMax V2" overrideLogoUrl={liveLogos.ShortMaxV2} />,
       },
       {
         id: 'GoodShort',
@@ -720,7 +770,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending, Terbaru, Anime & Indonesian Dubbing',
         available: true,
         count: counts.GoodShort ?? 0,
-        logo: <ProviderBrandLogo providerId="GoodShort" name="GoodShort" />,
+        logo: <ProviderBrandLogo providerId="GoodShort" name="GoodShort" overrideLogoUrl={liveLogos.GoodShort} />,
       },
       {
         id: 'FreeReels',
@@ -728,7 +778,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Cursor-Paginated Popular, Anime & Dubbed Reels',
         available: true,
         count: counts.FreeReels ?? 0,
-        logo: <ProviderBrandLogo providerId="FreeReels" name="FreeReels" />,
+        logo: <ProviderBrandLogo providerId="FreeReels" name="FreeReels" overrideLogoUrl={liveLogos.FreeReels} />,
       },
       {
         id: 'DramaWave',
@@ -736,7 +786,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Exclusive & VIP Dubbed Fantasy Dramas',
         available: true,
         count: counts.DramaWave ?? 0,
-        logo: <ProviderBrandLogo providerId="DramaWave" name="DramaWave" />,
+        logo: <ProviderBrandLogo providerId="DramaWave" name="DramaWave" overrideLogoUrl={liveLogos.DramaWave} />,
       },
       {
         id: 'FlickReels',
@@ -744,7 +794,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'All-Drama Catalog & Rebirth Family Shorts',
         available: true,
         count: counts.FlickReels ?? 0,
-        logo: <ProviderBrandLogo providerId="FlickReels" name="FlickReels" />,
+        logo: <ProviderBrandLogo providerId="FlickReels" name="FlickReels" overrideLogoUrl={liveLogos.FlickReels} />,
       },
       {
         id: 'Vigloo',
@@ -752,7 +802,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'K-Short Originals, Ranking & Filterable Browse',
         available: true,
         count: counts.Vigloo ?? 0,
-        logo: <ProviderBrandLogo providerId="Vigloo" name="Vigloo" />,
+        logo: <ProviderBrandLogo providerId="Vigloo" name="Vigloo" overrideLogoUrl={liveLogos.Vigloo} />,
       },
       {
         id: 'FlexTV',
@@ -760,7 +810,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Urban Secret Identity & Melodrama Mini-Series',
         available: true,
         count: counts.FlexTV ?? 0,
-        logo: <ProviderBrandLogo providerId="FlexTV" name="FlexTV" />,
+        logo: <ProviderBrandLogo providerId="FlexTV" name="FlexTV" overrideLogoUrl={liveLogos.FlexTV} />,
       },
       {
         id: 'DramaDash',
@@ -768,7 +818,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Fast-Paced Trending Romance & Thriller Shorts',
         available: true,
         count: counts.DramaDash ?? 0,
-        logo: <ProviderBrandLogo providerId="DramaDash" name="DramaDash" />,
+        logo: <ProviderBrandLogo providerId="DramaDash" name="DramaDash" overrideLogoUrl={liveLogos.DramaDash} />,
       },
       {
         id: 'FlareFlow',
@@ -776,7 +826,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: '1080p Dubbed & Original Vertical Dramas',
         available: true,
         count: counts.FlareFlow ?? 0,
-        logo: <ProviderBrandLogo providerId="FlareFlow" name="FlareFlow" />,
+        logo: <ProviderBrandLogo providerId="FlareFlow" name="FlareFlow" overrideLogoUrl={liveLogos.FlareFlow} />,
       },
       {
         id: 'StoryReel',
@@ -784,7 +834,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Encrypted & Plain 1080p HLS Mini-Dramas',
         available: true,
         count: counts.StoryReel ?? 0,
-        logo: <ProviderBrandLogo providerId="StoryReel" name="StoryReel" />,
+        logo: <ProviderBrandLogo providerId="StoryReel" name="StoryReel" overrideLogoUrl={liveLogos.StoryReel} />,
       },
       {
         id: 'StoryReelV2',
@@ -792,7 +842,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'StoryReel V2 Multilingual Global Catalog',
         available: true,
         count: counts.StoryReelV2 ?? 0,
-        logo: <ProviderBrandLogo providerId="StoryReelV2" name="StoryReel V2" />,
+        logo: <ProviderBrandLogo providerId="StoryReelV2" name="StoryReel V2" overrideLogoUrl={liveLogos.StoryReelV2} />,
       },
       {
         id: 'VibeShort',
@@ -800,7 +850,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Dubbed Mafia, CEO & Plain-Stream Verticals',
         available: true,
         count: counts.VibeShort ?? 0,
-        logo: <ProviderBrandLogo providerId="VibeShort" name="VibeShort" />,
+        logo: <ProviderBrandLogo providerId="VibeShort" name="VibeShort" overrideLogoUrl={liveLogos.VibeShort} />,
       },
       {
         id: 'VibeShortV2',
@@ -808,7 +858,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'VibeShort V2 Fresh Drops & Multi-Audio Feed',
         available: true,
         count: counts.VibeShortV2 ?? 0,
-        logo: <ProviderBrandLogo providerId="VibeShortV2" name="VibeShort V2" />,
+        logo: <ProviderBrandLogo providerId="VibeShortV2" name="VibeShort V2" overrideLogoUrl={liveLogos.VibeShortV2} />,
       },
       {
         id: 'CubeTV',
@@ -816,7 +866,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot Wuxia, Martial Arts & New Release Shorts',
         available: true,
         count: counts.CubeTV ?? 0,
-        logo: <ProviderBrandLogo providerId="CubeTV" name="CubeTV" />,
+        logo: <ProviderBrandLogo providerId="CubeTV" name="CubeTV" overrideLogoUrl={liveLogos.CubeTV} />,
       },
       {
         id: 'MicroDrama',
@@ -824,7 +874,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Bite-Sized Micro Episodes & Revenge Arcs',
         available: true,
         count: counts.MicroDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="MicroDrama" name="MicroDrama" />,
+        logo: <ProviderBrandLogo providerId="MicroDrama" name="MicroDrama" overrideLogoUrl={liveLogos.MicroDrama} />,
       },
       {
         id: 'FunDrama',
@@ -832,7 +882,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Lighthearted Rom-Com & Trending Short Stories',
         available: true,
         count: counts.FunDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="FunDrama" name="FunDrama" />,
+        logo: <ProviderBrandLogo providerId="FunDrama" name="FunDrama" overrideLogoUrl={liveLogos.FunDrama} />,
       },
       {
         id: 'FreeShort',
@@ -840,7 +890,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot, Ranking & Dubbed Vertical Drama Library',
         available: true,
         count: counts.FreeShort ?? 0,
-        logo: <ProviderBrandLogo providerId="FreeShort" name="FreeShort" />,
+        logo: <ProviderBrandLogo providerId="FreeShort" name="FreeShort" overrideLogoUrl={liveLogos.FreeShort} />,
       },
       {
         id: 'ToonShort',
@@ -848,7 +898,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Popular Motion-Comic & Contract Love Shorts',
         available: true,
         count: counts.ToonShort ?? 0,
-        logo: <ProviderBrandLogo providerId="ToonShort" name="ToonShort" />,
+        logo: <ProviderBrandLogo providerId="ToonShort" name="ToonShort" overrideLogoUrl={liveLogos.ToonShort} />,
       },
       {
         id: 'HappyShort',
@@ -856,7 +906,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending, Popular, Terbaru & Daily Rankings',
         available: true,
         count: counts.HappyShort ?? 0,
-        logo: <ProviderBrandLogo providerId="HappyShort" name="HappyShort" />,
+        logo: <ProviderBrandLogo providerId="HappyShort" name="HappyShort" overrideLogoUrl={liveLogos.HappyShort} />,
       },
       {
         id: 'PineDrama',
@@ -864,7 +914,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Vertical Legal, Suspense & Romance Mini-Series',
         available: true,
         count: counts.PineDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="PineDrama" name="PineDrama" />,
+        logo: <ProviderBrandLogo providerId="PineDrama" name="PineDrama" overrideLogoUrl={liveLogos.PineDrama} />,
       },
       {
         id: 'DotDrama',
@@ -872,7 +922,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Fantasy Mystery & Supernatural Short Series',
         available: true,
         count: counts.DotDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="DotDrama" name="DotDrama" />,
+        logo: <ProviderBrandLogo providerId="DotDrama" name="DotDrama" overrideLogoUrl={liveLogos.DotDrama} />,
       },
       {
         id: 'iDrama',
@@ -880,7 +930,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'H.264 High-Compatibility CEO & Romance Catalog',
         available: true,
         count: counts.iDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="iDrama" name="iDrama" />,
+        logo: <ProviderBrandLogo providerId="iDrama" name="iDrama" overrideLogoUrl={liveLogos.iDrama} />,
       },
       {
         id: 'iDramaV2',
@@ -888,7 +938,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'iDrama V2 Extended Cursor Catalog',
         available: true,
         count: counts.iDramaV2 ?? 0,
-        logo: <ProviderBrandLogo providerId="iDramaV2" name="iDrama V2" />,
+        logo: <ProviderBrandLogo providerId="iDramaV2" name="iDrama V2" overrideLogoUrl={liveLogos.iDramaV2} />,
       },
       {
         id: 'DramaOra',
@@ -896,7 +946,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Curated Category Hits, Romance & Revenge Shorts',
         available: true,
         count: counts.DramaOra ?? 0,
-        logo: <ProviderBrandLogo providerId="DramaOra" name="DramaOra" />,
+        logo: <ProviderBrandLogo providerId="DramaOra" name="DramaOra" overrideLogoUrl={liveLogos.DramaOra} />,
       },
       {
         id: 'MeloShort',
@@ -904,7 +954,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Top Rankings, Fresh Picks & Multi-Genre Reels',
         available: true,
         count: counts.MeloShort ?? 0,
-        logo: <ProviderBrandLogo providerId="MeloShort" name="MeloShort" />,
+        logo: <ProviderBrandLogo providerId="MeloShort" name="MeloShort" overrideLogoUrl={liveLogos.MeloShort} />,
       },
       {
         id: 'PetaDrama',
@@ -912,7 +962,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Full Catalog Vertical Series & Category Specials',
         available: true,
         count: counts.PetaDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="PetaDrama" name="PetaDrama" />,
+        logo: <ProviderBrandLogo providerId="PetaDrama" name="PetaDrama" overrideLogoUrl={liveLogos.PetaDrama} />,
       },
       {
         id: 'RadReels',
@@ -920,7 +970,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Latest Releases & High-Speed Trending Reels',
         available: true,
         count: counts.RadReels ?? 0,
-        logo: <ProviderBrandLogo providerId="RadReels" name="RadReels" />,
+        logo: <ProviderBrandLogo providerId="RadReels" name="RadReels" overrideLogoUrl={liveLogos.RadReels} />,
       },
       {
         id: 'DramaVerse',
@@ -928,7 +978,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot Releases, Modern CEO & Mystery Shorts',
         available: true,
         count: counts.DramaVerse ?? 0,
-        logo: <ProviderBrandLogo providerId="DramaVerse" name="DramaVerse" />,
+        logo: <ProviderBrandLogo providerId="DramaVerse" name="DramaVerse" overrideLogoUrl={liveLogos.DramaVerse} />,
       },
       {
         id: 'KalosTV',
@@ -936,7 +986,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Curated Vertical Mini-Series & Global Subs',
         available: true,
         count: counts.KalosTV ?? 0,
-        logo: <ProviderBrandLogo providerId="KalosTV" name="KalosTV" />,
+        logo: <ProviderBrandLogo providerId="KalosTV" name="KalosTV" overrideLogoUrl={liveLogos.KalosTV} />,
       },
       {
         id: 'StardustTV',
@@ -944,7 +994,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Hot Charts, Terbaru Drops & Exclusive Mini-Dramas',
         available: true,
         count: counts.StardustTV ?? 0,
-        logo: <ProviderBrandLogo providerId="StardustTV" name="StardustTV" />,
+        logo: <ProviderBrandLogo providerId="StardustTV" name="StardustTV" overrideLogoUrl={liveLogos.StardustTV} />,
       },
       {
         id: 'StarShort',
@@ -952,7 +1002,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Trending VIP Shorts, Billionaire & Urban Romance',
         available: true,
         count: counts.StarShort ?? 0,
-        logo: <ProviderBrandLogo providerId="StarShort" name="StarShort" />,
+        logo: <ProviderBrandLogo providerId="StarShort" name="StarShort" overrideLogoUrl={liveLogos.StarShort} />,
       },
       {
         id: 'DramaBite',
@@ -960,7 +1010,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Bite-Sized Cliffhangers & Fast-Paced Thrillers',
         available: true,
         count: counts.DramaBite ?? 0,
-        logo: <ProviderBrandLogo providerId="DramaBite" name="DramaBite" />,
+        logo: <ProviderBrandLogo providerId="DramaBite" name="DramaBite" overrideLogoUrl={liveLogos.DramaBite} />,
       },
       {
         id: 'LoveShots',
@@ -968,7 +1018,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Top Rankings, Sweet Romance & Melodrama Hits',
         available: true,
         count: counts.LoveShots ?? 0,
-        logo: <ProviderBrandLogo providerId="LoveShots" name="LoveShots" />,
+        logo: <ProviderBrandLogo providerId="LoveShots" name="LoveShots" overrideLogoUrl={liveLogos.LoveShots} />,
       },
       {
         id: 'MyDrama',
@@ -976,7 +1026,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Daily Picks & Bite-Sized Asian Mini-Series',
         available: true,
         count: counts.MyDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="MyDrama" name="MyDrama" />,
+        logo: <ProviderBrandLogo providerId="MyDrama" name="MyDrama" overrideLogoUrl={liveLogos.MyDrama} />,
       },
       {
         id: 'ShotShort',
@@ -984,7 +1034,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Newest Drops & Sorted All-Drama Catalog',
         available: true,
         count: counts.ShotShort ?? 0,
-        logo: <ProviderBrandLogo providerId="ShotShort" name="ShotShort" />,
+        logo: <ProviderBrandLogo providerId="ShotShort" name="ShotShort" overrideLogoUrl={liveLogos.ShotShort} />,
       },
       {
         id: 'MoboReels',
@@ -992,7 +1042,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Original Hits, Asia, Animasi & Dedicated VTT Subtitles',
         available: true,
         count: counts.MoboReels ?? 0,
-        logo: <ProviderBrandLogo providerId="MoboReels" name="MoboReels" />,
+        logo: <ProviderBrandLogo providerId="MoboReels" name="MoboReels" overrideLogoUrl={liveLogos.MoboReels} />,
       },
       {
         id: 'BlinkDrama',
@@ -1000,7 +1050,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Dual AES/Plain HD Streams & Fresh Drama Drops',
         available: true,
         count: counts.BlinkDrama ?? 0,
-        logo: <ProviderBrandLogo providerId="BlinkDrama" name="BlinkDrama" />,
+        logo: <ProviderBrandLogo providerId="BlinkDrama" name="BlinkDrama" overrideLogoUrl={liveLogos.BlinkDrama} />,
       },
       {
         id: 'JoyReels',
@@ -1008,7 +1058,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Weekly Top Charts, Hot Reels, Films & Asian Series',
         available: true,
         count: counts.JoyReels ?? 0,
-        logo: <ProviderBrandLogo providerId="JoyReels" name="JoyReels" />,
+        logo: <ProviderBrandLogo providerId="JoyReels" name="JoyReels" overrideLogoUrl={liveLogos.JoyReels} />,
       },
       {
         id: 'SodaReels',
@@ -1016,7 +1066,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Multi-Quality Modern Romance & Urban Short Dramas',
         available: true,
         count: counts.SodaReels ?? 0,
-        logo: <ProviderBrandLogo providerId="SodaReels" name="SodaReels" />,
+        logo: <ProviderBrandLogo providerId="SodaReels" name="SodaReels" overrideLogoUrl={liveLogos.SodaReels} />,
       },
       {
         id: 'BonusTV',
@@ -1024,7 +1074,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'CEO Romance, Family Revenge & Vertical Mini-Dramas',
         available: true,
         count: counts.BonusTV ?? 0,
-        logo: <ProviderBrandLogo providerId="BonusTV" name="BonusTV" />,
+        logo: <ProviderBrandLogo providerId="BonusTV" name="BonusTV" overrideLogoUrl={liveLogos.BonusTV} />,
       },
       {
         id: 'iQIYI',
@@ -1032,10 +1082,10 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
         tagline: 'Premium C-Drama, K-Drama, Anime, Film & VIP Picks',
         available: true,
         count: counts.iQIYI ?? 0,
-        logo: <ProviderBrandLogo providerId="iQIYI" name="iQIYI" />,
+        logo: <ProviderBrandLogo providerId="iQIYI" name="iQIYI" overrideLogoUrl={liveLogos.iQIYI} />,
       },
     ],
-    [t, counts]
+    [t, counts, liveLogos]
   );
 
   const filtered = useMemo(() => {
@@ -1127,7 +1177,7 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
                     onSelectProvider(prov.id);
                     onClose();
                   }}
-                  className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between gap-3 transition-all min-h-[68px] ${
+                  className={`w-full px-3.5 py-3 rounded-2xl border text-left flex items-center justify-between gap-3 transition-all min-h-[70px] ${
                     isSelected
                       ? 'bg-[var(--cd-accent-soft)] border-[var(--cd-accent)] shadow-lg'
                       : prov.available
@@ -1135,33 +1185,33 @@ export const ProviderHubModal: React.FC<ProviderHubModalProps> = ({
                       : 'bg-[#141418]/60 border-white/5 opacity-60 cursor-not-allowed'
                   }`}
                 >
-                  <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
                     {prov.logo}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-white truncate">
+                        <span className="text-sm font-bold text-white truncate leading-snug">
                           {prov.name}
                         </span>
                         {!prov.available && (
-                          <span className="text-[11px] font-medium text-[#71717A]">
+                          <span className="text-[11px] font-medium text-[#71717A] shrink-0">
                             · {t.providers.comingSoon}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-[#A1A1AA] truncate mt-0.5">
+                      <p className="text-xs text-[#A1A1AA] truncate mt-0.5 leading-snug">
                         {prov.tagline}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2.5 shrink-0">
+                  <div className="flex items-center gap-2.5 shrink-0 pl-2 text-right">
                     {prov.available && (
-                      <span className="text-xs font-semibold text-[#D4D4D8] tabular-nums">
+                      <span className="text-xs font-semibold text-[#E4E4E7] tabular-nums whitespace-nowrap">
                         {prov.count} {t.providers.titlesLoaded}
                       </span>
                     )}
                     {isSelected && (
-                      <span className="w-7 h-7 rounded-full cd-accent-bg text-white flex items-center justify-center">
+                      <span className="w-7 h-7 rounded-full cd-accent-bg text-white flex items-center justify-center shrink-0">
                         <Check className="w-4 h-4" />
                       </span>
                     )}

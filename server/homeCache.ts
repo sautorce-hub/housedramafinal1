@@ -13,12 +13,14 @@ import { notifyCatalogAdditionsToGoogle } from './googleIndexing.ts';
 export type HomeLangCode = 'en' | 'id' | 'cn' | 'vi';
 
 export interface CachedDramaItem {
+  id?: string;
   bookId: string;
   title: string;
   slug?: string;
   cover: string;
   description: string;
   chapterCount: number;
+  episodes?: number;
   tags: string[];
   playCount?: string;
   corner?: string;
@@ -443,12 +445,14 @@ function normalizeDrama(
     chapterCount >= 20 ? 'Completed' : 'Ongoing';
 
   return {
+    id: bookId,
     bookId,
     title,
-    slug: slugifyTitle(title),
+    slug: cleanText(raw.slug) || slugifyTitle(title),
     cover,
     description,
     chapterCount,
+    episodes: chapterCount,
     tags,
     playCount: cleanText(raw.playCount ?? raw.hotCode ?? raw.views) || undefined,
     corner: cornerText || undefined,
@@ -717,25 +721,35 @@ async function fetchUpstreamFeed(
   }
   url.searchParams.set('token', token);
 
-  const res = await fetch(url.toString(), {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(7500),
-  });
-  if (!res.ok) return [];
-  const json = (await res.json()) as unknown;
-  const rawList = extractBookArray(json);
-
-  const out: CachedDramaItem[] = [];
-  const seen = new Set<string>();
-  rawList.forEach((raw, idx) => {
-    const item = normalizeDrama(raw, provider, withRank ? idx : undefined);
-    if (item && !seen.has(item.bookId)) {
-      seen.add(item.bookId);
-      out.push(item);
+  try {
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(7500),
+    });
+    if (!res.ok) return [];
+    const rawText = await res.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      return [];
     }
-  });
-  return out;
+    const rawList = extractBookArray(json);
+
+    const out: CachedDramaItem[] = [];
+    const seen = new Set<string>();
+    rawList.forEach((raw, idx) => {
+      const item = normalizeDrama(raw, provider, withRank ? idx : undefined);
+      if (item && !seen.has(item.bookId)) {
+        seen.add(item.bookId);
+        out.push(item);
+      }
+    });
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 async function readHomeFromDb(

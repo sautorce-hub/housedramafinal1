@@ -39,6 +39,23 @@ export function getPeekCachedHomeCatalog(
   return null;
 }
 
+function readStaleCachedHomeCatalog(
+  key: string
+): HomeCatalogResponse | null {
+  const mem = memoryHomeCache.get(key);
+  if (mem?.data) return mem.data;
+  try {
+    const raw = sessionStorage.getItem(`${SESSION_PREFIX}${key}`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { data?: HomeCatalogResponse };
+      if (parsed?.data) return parsed.data;
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return null;
+}
+
 export async function fetchHomeCatalog(
   lang: LanguageCode,
   provider: ProviderId = 'All',
@@ -55,34 +72,67 @@ export async function fetchHomeCatalog(
     provider,
   });
 
-  const res = await fetch(`/api/home?${params.toString()}`, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
 
-  if (!res.ok) {
-    throw new Error(`Home catalog HTTP ${res.status}`);
-  }
+  try {
+    const res = await fetch(`/api/home?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
 
-  const data = (await res.json()) as HomeCatalogResponse;
-  const hasItems =
-    data.heroSpotlights.length > 0 ||
-    data.trendingTop.length > 0 ||
-    data.hotReleases.length > 0 ||
-    data.catalogGrid.length > 0;
-
-  if (hasItems) {
-    const entry = {
-      expiresAt: Date.now() + HOME_CLIENT_TTL_MS,
-      data,
-    };
-    memoryHomeCache.set(key, entry);
-    try {
-      sessionStorage.setItem(`${SESSION_PREFIX}${key}`, JSON.stringify(entry));
-    } catch {
-      // Ignore quota errors
+    if (!res.ok) {
+      throw new Error(`Home catalog HTTP ${res.status}`);
     }
-  }
 
-  return data;
+    const rawText = await res.text();
+    const raw = JSON.parse(rawText) as Partial<HomeCatalogResponse>;
+    const data: HomeCatalogResponse = {
+      lang: raw.lang ?? lang,
+      provider: raw.provider ?? provider,
+      heroSpotlights: Array.isArray(raw.heroSpotlights) ? raw.heroSpotlights : [],
+      trendingTop: Array.isArray(raw.trendingTop) ? raw.trendingTop : [],
+      hotReleases: Array.isArray(raw.hotReleases) ? raw.hotReleases : [],
+      catalogGrid: Array.isArray(raw.catalogGrid) ? raw.catalogGrid : [],
+      providerCounts:
+        raw.providerCounts && typeof raw.providerCounts === 'object'
+          ? raw.providerCounts
+          : {},
+      updatedAt: Number(raw.updatedAt) || Date.now(),
+      expiresAt: Number(raw.expiresAt) || Date.now() + HOME_CLIENT_TTL_MS,
+      cached: Boolean(raw.cached),
+      stale: Boolean(raw.stale),
+      source: String(raw.source || 'live-refresh'),
+    };
+
+    const hasItems =
+      data.heroSpotlights.length > 0 ||
+      data.trendingTop.length > 0 ||
+      data.hotReleases.length > 0 ||
+      data.catalogGrid.length > 0;
+
+    if (hasItems) {
+      const entry = {
+        expiresAt: Date.now() + HOME_CLIENT_TTL_MS,
+        data,
+      };
+      memoryHomeCache.set(key, entry);
+      try {
+        sessionStorage.setItem(`${SESSION_PREFIX}${key}`, JSON.stringify(entry));
+      } catch {
+        // Ignore quota errors
+      }
+    }
+
+    return data;
+  } catch (err) {
+    const stale = readStaleCachedHomeCatalog(key);
+    if (stale) {
+      return { ...stale, stale: true, cached: true };
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }

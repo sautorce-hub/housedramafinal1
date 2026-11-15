@@ -5,6 +5,10 @@ import {
   getProviderEndpoints,
   type ProviderEndpointSpec,
 } from '../services/dramaProviders';
+import {
+  getOfficialProviderLogoUrl,
+  getProxiedLogoUrl,
+} from '../constants/providerLogos';
 import { useDramaContext } from '../context/DramaContext';
 import { DramaCard } from './DramaCard';
 import type { DramaItem, LanguageCode, ProviderName } from '../types/drama';
@@ -55,16 +59,22 @@ export const ProviderEndpointSection: React.FC<ProviderEndpointSectionProps> = (
   const [activeKey, setActiveKey] = useState<string>(
     () => endpoints[0]?.key ?? 'foryou'
   );
+  const officialLogoUrl = getOfficialProviderLogoUrl(provider);
+  const proxiedLogoUrl = getProxiedLogoUrl(officialLogoUrl);
+  const [logoStage, setLogoStage] = useState<0 | 1 | 2>(
+    officialLogoUrl ? 0 : 2
+  );
   const [feedMap, setFeedMap] = useState<Record<string, EndpointFeedState>>({});
   const feedMapRef = useRef<Record<string, EndpointFeedState>>(feedMap);
   feedMapRef.current = feedMap;
   const inFlightKeysRef = useRef<Set<string>>(new Set());
 
-  // Reset active endpoint tab to the provider's first endpoint whenever provider changes
+  // Reset active endpoint tab and logo state whenever provider changes
   useEffect(() => {
     const firstKey = endpoints[0]?.key ?? 'foryou';
     setActiveKey(firstKey);
-  }, [provider, endpoints]);
+    setLogoStage(officialLogoUrl ? 0 : 2);
+  }, [provider, endpoints, officialLogoUrl]);
 
   const activeEndpoint: ProviderEndpointSpec | undefined = useMemo(
     () => endpoints.find((ep) => ep.key === activeKey) ?? endpoints[0],
@@ -175,7 +185,21 @@ export const ProviderEndpointSection: React.FC<ProviderEndpointSectionProps> = (
       {/* Provider Title & Reset */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <Layers className="w-4 h-4 cd-accent-text shrink-0" />
+          {logoStage < 2 && officialLogoUrl ? (
+            <div className="w-8 h-8 rounded-lg bg-[#0D0D11] border border-white/15 p-1 flex items-center justify-center shrink-0 overflow-hidden">
+              <img
+                src={logoStage === 0 ? officialLogoUrl : proxiedLogoUrl}
+                alt={`${adapter?.label ?? provider} official logo`}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-contain rounded"
+                onError={() =>
+                  setLogoStage((prev) => (prev === 0 && proxiedLogoUrl ? 1 : 2))
+                }
+              />
+            </div>
+          ) : (
+            <Layers className="w-4 h-4 cd-accent-text shrink-0" />
+          )}
           <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight truncate">
             {adapter?.label ?? provider}
           </h2>

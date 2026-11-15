@@ -243,19 +243,37 @@ export function createLk21Router({
       if (seg.acceptRanges) res.setHeader('Accept-Ranges', seg.acceptRanges);
 
       if (seg.upstream.body) {
-        Readable.fromWeb(
+        const nodeStream = Readable.fromWeb(
           seg.upstream.body as unknown as import('node:stream/web').ReadableStream
-        ).pipe(res);
+        );
+        const cleanup = () => {
+          if (!nodeStream.destroyed) {
+            nodeStream.destroy();
+          }
+        };
+        nodeStream.on('error', () => {
+          cleanup();
+          if (!res.headersSent) {
+            res.status(502).json({ ok: false, error: 'Upstream segment stream error' });
+          } else {
+            res.end();
+          }
+        });
+        req.on('close', cleanup);
+        res.on('error', cleanup);
+        nodeStream.pipe(res);
       } else {
         const buf = Buffer.from(await seg.upstream.arrayBuffer());
         res.send(buf);
       }
     } catch (err) {
-      res.status(502).json({
-        ok: false,
-        error:
-          err instanceof Error ? err.message : 'Failed to proxy LK21 segment',
-      });
+      if (!res.headersSent) {
+        res.status(502).json({
+          ok: false,
+          error:
+            err instanceof Error ? err.message : 'Failed to proxy LK21 segment',
+        });
+      }
     }
   });
 

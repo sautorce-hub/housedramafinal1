@@ -5,6 +5,7 @@ import {
   getMovieEpisodesFromDb,
   getMovieSourcesFromDb,
   getTrendingStatsMapFromDb,
+  listMoviesFallbackFromDb,
   setLk21CacheInDb,
   upsertMovieEpisodesInDb,
   upsertMovieSourcesInDb,
@@ -331,6 +332,31 @@ function attachStatsToMovies(
   });
 }
 
+function dbFallbackRowToLk21Card(
+  row: Awaited<ReturnType<typeof listMoviesFallbackFromDb>>[number]
+): Lk21MovieCard {
+  const isMovie = row.movieType !== 'series';
+  return {
+    id: row.id || row.slug,
+    slug: row.slug,
+    app: 'lk21',
+    title: row.title,
+    cover: row.cover,
+    coverHz: row.coverHz || row.cover,
+    coverVt: row.coverVt || row.cover,
+    rating: row.rating,
+    quality: row.quality || 'HD',
+    badge: row.badge || '',
+    subtitle: '',
+    description:
+      row.description || `Stream ${row.title} in Full HD on House Drama Movies.`,
+    genre: row.genres || [],
+    updateInfo: row.updateInfo || '',
+    type: isMovie ? 'movie' : 'series',
+    is_movie: isMovie,
+  };
+}
+
 async function fetchUpstreamLk21Json(
   token: string,
   endpoint: string,
@@ -344,18 +370,28 @@ async function fetchUpstreamLk21Json(
       }
     }
   }
-  const res = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!res.ok) {
-    throw new Error(`LK21 upstream error HTTP ${res.status}`);
+  try {
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) {
+      throw new Error(`LK21 upstream error HTTP ${res.status}`);
+    }
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`LK21 upstream returned invalid JSON for ${endpoint}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`LK21 fetch failed (${endpoint}): ${msg}`);
   }
-  return (await res.json()) as Record<string, unknown>;
 }
 
 function runDeduplicated<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -430,15 +466,48 @@ export async function getLk21Home(
     };
   }
 
-  const fresh = await runDeduplicated(cacheKey, refresh);
-  const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
-  return {
-    ...fresh,
-    rows: fresh.rows.map((r) => ({
-      ...r,
-      items: attachStatsToMovies(r.items, statsMap),
-    })),
-  };
+  try {
+    const fresh = await runDeduplicated(cacheKey, refresh);
+    const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
+    return {
+      ...fresh,
+      rows: fresh.rows.map((r) => ({
+        ...r,
+        items: attachStatsToMovies(r.items, statsMap),
+      })),
+    };
+  } catch {
+    const fallbackRows = await listMoviesFallbackFromDb(36).catch(() => []);
+    const cards = fallbackRows.map(dbFallbackRowToLk21Card);
+    const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
+    const enriched = attachStatsToMovies(cards, statsMap);
+    return {
+      ok: true,
+      totalMovies: enriched.length,
+      updated: Date.now(),
+      rows: enriched.length > 0
+        ? [
+            {
+              key: 'lk21.featured',
+              label: 'Featured Movies (Cached)',
+              items: enriched.slice(0, 18),
+            },
+            ...(enriched.length > 18
+              ? [
+                  {
+                    key: 'lk21.latest',
+                    label: 'Latest Releases',
+                    items: enriched.slice(18),
+                  },
+                ]
+              : []),
+          ]
+        : [],
+      cached: true,
+      stale: true,
+      source: 'database-fallback',
+    };
+  }
 }
 
 export async function getLk21Menu(getToken: () => string): Promise<Lk21MenuPayload> {
@@ -475,7 +544,20 @@ export async function getLk21Menu(getToken: () => string): Promise<Lk21MenuPaylo
     return cached.payload;
   }
 
-  return runDeduplicated(cacheKey, refresh);
+  try {
+    return await runDeduplicated(cacheKey, refresh);
+  } catch {
+    return {
+      ok: true,
+      types: [
+        { key: 'lk21.featured', label: 'Featured' },
+        { key: 'lk21.latest', label: 'Latest' },
+      ],
+      genres: [],
+      countries: [],
+      years: [],
+    };
+  }
 }
 
 export async function getLk21Latest(
@@ -523,12 +605,26 @@ export async function getLk21Latest(
     };
   }
 
-  const fresh = await runDeduplicated(cacheKey, refresh);
-  const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
-  return {
-    ...fresh,
-    items: attachStatsToMovies(fresh.items, statsMap),
-  };
+  try {
+    const fresh = await runDeduplicated(cacheKey, refresh);
+    const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
+    return {
+      ...fresh,
+      items: attachStatsToMovies(fresh.items, statsMap),
+    };
+  } catch {
+    const fallbackRows = safePage === 1 ? await listMoviesFallbackFromDb(24).catch(() => []) : [];
+    const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
+    const items = attachStatsToMovies(fallbackRows.map(dbFallbackRowToLk21Card), statsMap);
+    return {
+      ok: true,
+      label: 'Latest Movies & Series',
+      page: safePage,
+      count: items.length,
+      hasMore: false,
+      items,
+    };
+  }
 }
 
 export async function getLk21Category(
@@ -582,12 +678,27 @@ export async function getLk21Category(
     };
   }
 
-  const fresh = await runDeduplicated(cacheKey, refresh);
-  const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
-  return {
-    ...fresh,
-    items: attachStatsToMovies(fresh.items, statsMap),
-  };
+  try {
+    const fresh = await runDeduplicated(cacheKey, refresh);
+    const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
+    return {
+      ...fresh,
+      items: attachStatsToMovies(fresh.items, statsMap),
+    };
+  } catch {
+    const fallbackRows = safePage === 1 ? await listMoviesFallbackFromDb(24).catch(() => []) : [];
+    const statsMap = await getTrendingStatsMapFromDb(250).catch(() => ({}));
+    const items = attachStatsToMovies(fallbackRows.map(dbFallbackRowToLk21Card), statsMap);
+    return {
+      ok: true,
+      label: cleanKey,
+      key: cleanKey,
+      page: safePage,
+      count: items.length,
+      hasMore: false,
+      items,
+    };
+  }
 }
 
 export async function getLk21Search(
@@ -633,11 +744,27 @@ export async function getLk21Search(
     return payload;
   };
 
-  if (cached && !cached.stale && cached.payload) {
+  if (cached && cached.payload) {
+    if (cached.stale) {
+      void runDeduplicated(cacheKey, refresh).catch(() => {});
+    }
     return cached.payload;
   }
 
-  return runDeduplicated(cacheKey, refresh);
+  try {
+    return await runDeduplicated(cacheKey, refresh);
+  } catch {
+    const dbMatches = await listMoviesFallbackFromDb(24, cleanQ).catch(() => []);
+    const items = dbMatches.map(dbFallbackRowToLk21Card);
+    return {
+      ok: true,
+      q: cleanQ,
+      page: safePage,
+      count: items.length,
+      hasMore: false,
+      items,
+    };
+  }
 }
 
 export async function getLk21Detail(
@@ -812,7 +939,43 @@ export async function getLk21Detail(
     };
   }
 
-  return runDeduplicated(cacheKey, refresh);
+  try {
+    return await runDeduplicated(cacheKey, refresh);
+  } catch {
+    if (dbMovie && dbMovie.title) {
+      const recs = (dbMovie.recommendations || [])
+        .map((r) => normalizeLk21Card(r))
+        .filter((r): r is Lk21MovieCard => Boolean(r));
+      return {
+        ok: true,
+        id: dbMovie.movieId || cleanSlug,
+        slug: dbMovie.slug || cleanSlug,
+        app: 'lk21',
+        title: dbMovie.title,
+        cover: dbMovie.cover,
+        coverHz: dbMovie.coverHz || dbMovie.cover,
+        poster: dbMovie.poster || dbMovie.cover,
+        synopsis:
+          dbMovie.synopsis ||
+          `Watch ${dbMovie.title} in Full HD on House Drama Movies.`,
+        description:
+          dbMovie.synopsis ||
+          `Watch ${dbMovie.title} in Full HD on House Drama Movies.`,
+        actors: dbMovie.actors,
+        director: dbMovie.director,
+        year: dbMovie.year,
+        area: dbMovie.area,
+        genres: dbMovie.genres,
+        rating: dbMovie.rating,
+        quality: dbMovie.quality || 'HD',
+        type: dbMovie.movieType === 'series' ? 'series' : 'movie',
+        updateInfo: dbMovie.updateInfo,
+        providers: dbMovie.providers,
+        recommendations: recs,
+      };
+    }
+    return null;
+  }
 }
 
 export async function getLk21Episodes(
@@ -905,7 +1068,28 @@ export async function getLk21Episodes(
     };
   }
 
-  return runDeduplicated(cacheKey, refresh);
+  try {
+    return await runDeduplicated(cacheKey, refresh);
+  } catch {
+    return {
+      ok: true,
+      app: 'lk21',
+      id: cleanSlug,
+      slug: cleanSlug,
+      title: cleanSlug,
+      count: 1,
+      episodes: [
+        {
+          id: cleanSlug,
+          vid: cleanSlug,
+          title: cleanSlug,
+          episode: 'Full Movie',
+          manEpisode: 'Full Movie',
+          order: 1,
+        },
+      ],
+    };
+  }
 }
 
 export async function getLk21Stream(
@@ -997,105 +1181,148 @@ export async function getLk21Stream(
     };
   }
 
-  return runDeduplicated(cacheKey, async () => {
-    const token = getToken();
-    if (!token) throw new Error('Server MOLA_API_TOKEN is not configured');
+  try {
+    return await runDeduplicated(cacheKey, async () => {
+      const token = getToken();
+      if (!token) throw new Error('Server MOLA_API_TOKEN is not configured');
 
-    const raw = await fetchUpstreamLk21Json(token, '/stream', {
-      slug: upstreamSlug,
+      const raw = await fetchUpstreamLk21Json(token, '/stream', {
+        slug: upstreamSlug,
+      });
+
+      const rawUrl = cleanStr(raw.rawUrl);
+      const upstreamStreamUrl = cleanStr(raw.streamUrl ?? raw.url);
+      let finalStreamUrl = '';
+
+      // Always route HLS manifests through our backend proxy without upstream tokens
+      if (rawUrl && rawUrl.toLowerCase().includes('.m3u8')) {
+        finalStreamUrl = `/api/lk21/proxy/m3u8?url=${encodeURIComponent(rawUrl)}`;
+      } else if (upstreamStreamUrl.startsWith('/api/lk21/proxy/')) {
+        finalStreamUrl = stripTokensFromString(upstreamStreamUrl);
+      } else if (rawUrl) {
+        finalStreamUrl = `/api/proxy?url=${encodeURIComponent(rawUrl)}`;
+      } else if (upstreamStreamUrl) {
+        finalStreamUrl = stripTokensFromString(upstreamStreamUrl);
+      }
+
+      if (!finalStreamUrl) {
+        throw new Error('LK21 stream URL unavailable for this title');
+      }
+
+      const rawType = cleanStr(raw.type, 'hls').toLowerCase();
+      const isHls =
+        rawType === 'hls' ||
+        finalStreamUrl.includes('/proxy/m3u8') ||
+        finalStreamUrl.toLowerCase().includes('.m3u8');
+
+      const subtitlesRaw = Array.isArray(raw.subtitles)
+        ? (raw.subtitles as Array<Record<string, unknown>>)
+        : [];
+      const subtitles = subtitlesRaw
+        .map((s, idx) => {
+          const subUrl = cleanStr(s.url ?? s.src);
+          if (!subUrl) return null;
+          return {
+            id: cleanStr(s.id, `lk21-sub-${idx}`),
+            label: cleanStr(s.label ?? s.lang, `Subtitle ${idx + 1}`),
+            lang: cleanStr(s.lang, 'en'),
+            url: subUrl.startsWith('http')
+              ? `/api/proxy?url=${encodeURIComponent(subUrl)}`
+              : subUrl,
+            source: 'api' as const,
+          };
+        })
+        .filter((s): s is NonNullable<typeof s> => Boolean(s));
+
+      const payload: Lk21StreamPayload = {
+        ok: true,
+        type: isHls ? 'hls' : 'mp4',
+        url: finalStreamUrl,
+        streamUrl: finalStreamUrl,
+        isHls,
+        title: cleanStr(raw.title, cleanSlug),
+        poster: sanitizeImageUrl(raw.poster),
+        subtitles,
+        episodeNumber: resolvedEpNumber,
+        slug: cleanSlug || upstreamSlug,
+        vid: upstreamSlug,
+      };
+
+      await writeCache(cacheKey, 'stream', payload, STREAM_TTL_MS);
+      const resolvedSlug = cleanSlug || dbEp?.slug || upstreamSlug;
+      await Promise.all([
+        upsertMovieEpisodesInDb([
+          {
+            slug: resolvedSlug,
+            episodeNumber: resolvedEpNumber,
+            vid: upstreamSlug,
+            title: payload.title,
+            episodeLabel: `EP ${resolvedEpNumber}`,
+            streamUrl: finalStreamUrl,
+            rawUrl,
+            streamType: isHls ? 'hls' : 'mp4',
+            subtitles: subtitles as unknown as Array<Record<string, unknown>>,
+          },
+        ]),
+        upsertMovieSourcesInDb([
+          {
+            slug: resolvedSlug,
+            episodeNumber: resolvedEpNumber,
+            vid: upstreamSlug,
+            sourceName: 'LK21 Primary',
+            sourceType: isHls ? 'hls' : 'mp4',
+            quality: 'HD',
+            streamUrl: finalStreamUrl,
+            rawUrl,
+            subtitles: subtitles as unknown as Array<Record<string, unknown>>,
+          },
+        ]),
+      ]);
+
+      return payload;
     });
-
-    const rawUrl = cleanStr(raw.rawUrl);
-    const upstreamStreamUrl = cleanStr(raw.streamUrl ?? raw.url);
-    let finalStreamUrl = '';
-
-    // Always route HLS manifests through our backend proxy without upstream tokens
-    if (rawUrl && rawUrl.toLowerCase().includes('.m3u8')) {
-      finalStreamUrl = `/api/lk21/proxy/m3u8?url=${encodeURIComponent(rawUrl)}`;
-    } else if (upstreamStreamUrl.startsWith('/api/lk21/proxy/')) {
-      finalStreamUrl = stripTokensFromString(upstreamStreamUrl);
-    } else if (rawUrl) {
-      finalStreamUrl = `/api/proxy?url=${encodeURIComponent(rawUrl)}`;
-    } else if (upstreamStreamUrl) {
-      finalStreamUrl = stripTokensFromString(upstreamStreamUrl);
+  } catch (upstreamErr) {
+    if (cached?.payload?.streamUrl) {
+      return {
+        ...cached.payload,
+        episodeNumber: resolvedEpNumber,
+        slug: cleanSlug || upstreamSlug,
+        vid: upstreamSlug,
+      };
     }
-
-    if (!finalStreamUrl) {
-      throw new Error('LK21 stream URL unavailable for this title');
+    const staleDbSource = dbSources.find((s) => Boolean(s.streamUrl));
+    if (staleDbSource) {
+      return {
+        ok: true,
+        type: staleDbSource.sourceType === 'mp4' ? 'mp4' : 'hls',
+        url: staleDbSource.streamUrl,
+        streamUrl: staleDbSource.streamUrl,
+        isHls: staleDbSource.sourceType !== 'mp4',
+        title: cleanSlug,
+        poster: '',
+        subtitles: staleDbSource.subtitles as Lk21StreamPayload['subtitles'],
+        episodeNumber: staleDbSource.episodeNumber || resolvedEpNumber,
+        slug: staleDbSource.slug || cleanSlug,
+        vid: staleDbSource.vid || upstreamSlug,
+      };
     }
-
-    const rawType = cleanStr(raw.type, 'hls').toLowerCase();
-    const isHls =
-      rawType === 'hls' ||
-      finalStreamUrl.includes('/proxy/m3u8') ||
-      finalStreamUrl.toLowerCase().includes('.m3u8');
-
-    const subtitlesRaw = Array.isArray(raw.subtitles)
-      ? (raw.subtitles as Array<Record<string, unknown>>)
-      : [];
-    const subtitles = subtitlesRaw
-      .map((s, idx) => {
-        const subUrl = cleanStr(s.url ?? s.src);
-        if (!subUrl) return null;
-        return {
-          id: cleanStr(s.id, `lk21-sub-${idx}`),
-          label: cleanStr(s.label ?? s.lang, `Subtitle ${idx + 1}`),
-          lang: cleanStr(s.lang, 'en'),
-          url: subUrl.startsWith('http')
-            ? `/api/proxy?url=${encodeURIComponent(subUrl)}`
-            : subUrl,
-          source: 'api' as const,
-        };
-      })
-      .filter((s): s is NonNullable<typeof s> => Boolean(s));
-
-    const payload: Lk21StreamPayload = {
-      ok: true,
-      type: isHls ? 'hls' : 'mp4',
-      url: finalStreamUrl,
-      streamUrl: finalStreamUrl,
-      isHls,
-      title: cleanStr(raw.title, cleanSlug),
-      poster: sanitizeImageUrl(raw.poster),
-      subtitles,
-      episodeNumber: resolvedEpNumber,
-      slug: cleanSlug || upstreamSlug,
-      vid: upstreamSlug,
-    };
-
-    await writeCache(cacheKey, 'stream', payload, STREAM_TTL_MS);
-    const resolvedSlug = cleanSlug || dbEp?.slug || upstreamSlug;
-    await Promise.all([
-      upsertMovieEpisodesInDb([
-        {
-          slug: resolvedSlug,
-          episodeNumber: resolvedEpNumber,
-          vid: upstreamSlug,
-          title: payload.title,
-          episodeLabel: `EP ${resolvedEpNumber}`,
-          streamUrl: finalStreamUrl,
-          rawUrl,
-          streamType: isHls ? 'hls' : 'mp4',
-          subtitles: subtitles as unknown as Array<Record<string, unknown>>,
-        },
-      ]),
-      upsertMovieSourcesInDb([
-        {
-          slug: resolvedSlug,
-          episodeNumber: resolvedEpNumber,
-          vid: upstreamSlug,
-          sourceName: 'LK21 Primary',
-          sourceType: isHls ? 'hls' : 'mp4',
-          quality: 'HD',
-          streamUrl: finalStreamUrl,
-          rawUrl,
-          subtitles: subtitles as unknown as Array<Record<string, unknown>>,
-        },
-      ]),
-    ]);
-
-    return payload;
-  });
+    if (dbEp?.streamUrl) {
+      return {
+        ok: true,
+        type: dbEp.streamType === 'mp4' ? 'mp4' : 'hls',
+        url: dbEp.streamUrl,
+        streamUrl: dbEp.streamUrl,
+        isHls: dbEp.streamType !== 'mp4',
+        title: dbEp.title || cleanSlug,
+        poster: '',
+        subtitles: [],
+        episodeNumber: dbEp.episodeNumber || resolvedEpNumber,
+        slug: dbEp.slug || cleanSlug,
+        vid: upstreamSlug,
+      };
+    }
+    throw upstreamErr;
+  }
 }
 
 export async function getLk21StoredSources(
@@ -1138,32 +1365,41 @@ export async function fetchAndRewriteLk21M3u8(
     ? parsed.toString()
     : `${LK21_UPSTREAM_BASE}/proxy/m3u8?url=${encodeURIComponent(parsed.toString())}`;
 
-  const upstream = await fetch(fetchUrl, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/vnd.apple.mpegurl, text/plain, */*',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal: AbortSignal.timeout(15000),
-  });
+  let upstream: globalThis.Response | null = null;
+  try {
+    upstream = await fetch(fetchUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/vnd.apple.mpegurl, text/plain, */*',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    upstream = null;
+  }
 
-  if (!upstream.ok) {
-    // Fallback direct fetch if upstream proxy returned non-OK
+  if (!upstream || !upstream.ok) {
+    // Fallback direct fetch if upstream proxy returned non-OK or timed out
     if (fetchUrl !== parsed.toString()) {
-      const direct = await fetch(parsed.toString(), {
-        method: 'GET',
-        headers: { Accept: 'application/vnd.apple.mpegurl, text/plain, */*' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (direct.ok) {
-        const directText = await direct.text();
-        return {
-          status: direct.status,
-          body: rewriteM3u8ManifestLines(directText, parsed.toString()),
-        };
+      try {
+        const direct = await fetch(parsed.toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/vnd.apple.mpegurl, text/plain, */*' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (direct.ok) {
+          const directText = await direct.text();
+          return {
+            status: direct.status,
+            body: rewriteM3u8ManifestLines(directText, parsed.toString()),
+          };
+        }
+      } catch {
+        // Ignore direct fallback error and throw upstream error below
       }
     }
-    throw new Error(`Upstream manifest error HTTP ${upstream.status}`);
+    throw new Error(`Upstream manifest error HTTP ${upstream?.status ?? 504}`);
   }
 
   const rawText = await upstream.text();
